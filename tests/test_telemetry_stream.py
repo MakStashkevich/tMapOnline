@@ -9,6 +9,7 @@ import threading
 import time
 import tempfile
 from pathlib import Path
+from typing import Any
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -71,8 +72,13 @@ def main() -> None:
 
     server_thread = threading.Thread(target=serve_fixture, daemon=True)
     server_thread.start()
+    def receive_snapshot(snapshot: dict[str, Any]) -> None:
+        received.append(snapshot)
+        store.set_live_telemetry(snapshot)
+        received_snapshot.set()
+
     client = TelemetryStreamClient(
-        lambda snapshot: (received.append(snapshot), store.set_live_telemetry(snapshot), received_snapshot.set()),
+        receive_snapshot,
         lambda state: connected.set() if state else None,
         port=port,
     )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .store_common import *
-from .store_common import _is_valid_png
 from .services.player_history import PlayerHistoryMixin
 from .services.movement import MovementMixin
 from .services.live_telemetry import LiveTelemetryMixin
@@ -42,9 +41,12 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._players_file = players_file
         self._metrics_file = metrics_file
         self._avatars_dir = avatars_dir
+        self.avatar_directory = avatars_dir
         self._npc_sprites_dir = npc_sprites_dir
+        self.npc_sprite_directory = npc_sprites_dir
         self._npc_textures_dir = npc_textures_dir
         self._map_sprites_dir = map_sprites_dir
+        self.map_sprite_directory = map_sprites_dir
         self._coin_sprite_cache: dict[int, str | None] = {}
         self._sprite_renderer_lock = threading.Lock()
         self._movements_dir = movements_dir
@@ -54,7 +56,9 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._world_map_cache_dirty = False
         self._world_map_cache_last_saved_at = time.monotonic()
         self._boss_cache_dir = boss_cache_dir
+        self.boss_cache_directory = boss_cache_dir
         self._boss_cache_lock = threading.Lock()
+        self.boss_cache_lock = self._boss_cache_lock
         self._events: list[dict[str, Any]] = []
         self._history: list[dict[str, Any]] = []
         self._players: dict[str, dict[str, Any]] = {}

@@ -7,17 +7,16 @@ import re
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
+import struct
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from typing import Any, cast
+from urllib.parse import SplitResult, parse_qs, urlsplit
 
-from .store import (
-    BOSS_CACHE_DIR, GAME_LOG, MAP_SPRITES_DIR, NPC_SPRITES_DIR,
-    WORLD_MAP_FILE, StatusStore, _is_valid_png,
-)
+from .store import GAME_LOG, WORLD_MAP_FILE, StatusStore
+from .store_common import is_valid_png
 from ..config import page_enabled
 
 ASSET_ROOT = Path(__file__).resolve().parents[1] / "web" / "assets"
@@ -143,7 +142,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
                 return
             try:
-                body = (self.store._avatars_dir / filename).read_bytes()
+                body = (self.store.avatar_directory / filename).read_bytes()
             except OSError:
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
                 return
@@ -155,11 +154,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
                 return
             try:
-                body = (self.store._npc_sprites_dir / filename).read_bytes()
+                body = (self.store.npc_sprite_directory / filename).read_bytes()
             except OSError:
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
                 return
-            if not _is_valid_png(body):
+            if not is_valid_png(body):
                 self._send(404, b"invalid image\n", "text/plain; charset=utf-8")
                 return
             self._send(200, body, "image/png", cache_control="public, max-age=31536000, immutable")
@@ -169,11 +168,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
                 return
             try:
-                body = (self.store._map_sprites_dir / filename).read_bytes()
+                body = (self.store.map_sprite_directory / filename).read_bytes()
             except OSError:
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
                 return
-            if not _is_valid_png(body):
+            if not is_valid_png(body):
                 self._send(404, b"invalid image\n", "text/plain; charset=utf-8")
                 return
             self._send(200, body, "image/png", cache_control="public, max-age=31536000, immutable")
@@ -323,10 +322,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             raise ValueError("Недопустимый адрес ресурса вики.")
         cache_seconds = 30 * 24 * 60 * 60 if parsed.path.startswith("/images/") else 7 * 24 * 60 * 60
         digest = hashlib.sha256(raw_url.encode("utf-8")).hexdigest()
-        body_path = self.store._boss_cache_dir / f"{digest}.body"
-        meta_path = self.store._boss_cache_dir / f"{digest}.json"
+        body_path = self.store.boss_cache_directory / f"{digest}.body"
+        meta_path = self.store.boss_cache_directory / f"{digest}.json"
         now = time.time()
-        with self.store._boss_cache_lock:
+        with self.store.boss_cache_lock:
             try:
                 metadata = json.loads(meta_path.read_text(encoding="utf-8"))
                 cached_body = body_path.read_bytes()
@@ -339,8 +338,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             req = urllib.request.Request(raw_url, headers={"User-Agent": "TerrariaTunnelDashboard/1.0"})
             try:
                 with urllib.request.urlopen(req, timeout=12) as response:
-                    final = urlsplit(response.geturl())
-                    final_host = final.hostname or ""
+                    final = cast(SplitResult, urlsplit(response.geturl()))
+                    final_host: str = final.hostname or ""
                     if final.scheme != "https" or not (final_host == "wiki.gg" or final_host.endswith(".wiki.gg")):
                         raise ValueError("Вики перенаправила на недопустимый адрес.")
                     content_type = response.headers.get_content_type()
@@ -356,7 +355,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 if cached_body is not None and metadata:
                     return cached_body, str(metadata["content_type"]), 300
                 raise
-            self.store._boss_cache_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.store.boss_cache_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             temporary_body = body_path.with_suffix(".body.tmp")
             temporary_meta = meta_path.with_suffix(".json.tmp")
             temporary_body.write_bytes(body)
@@ -374,7 +373,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, _format: str, *_args: object) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         return
 
 

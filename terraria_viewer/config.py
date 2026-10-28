@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -48,7 +48,10 @@ def _merge(defaults: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(defaults)
     for key, value in user.items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _merge(result[key], value)
+            result[key] = _merge(
+                cast(dict[str, Any], result[key]),
+                cast(dict[str, Any], value),
+            )
         else:
             result[key] = value
     return result
@@ -60,10 +63,10 @@ def load_config(path: str | Path) -> dict[str, Any]:
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(yaml.safe_dump(DEFAULT_CONFIG, allow_unicode=True, sort_keys=False), encoding="utf-8")
         return deepcopy(DEFAULT_CONFIG)
-    loaded = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    loaded: Any = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(loaded, dict):
         raise ValueError(f"Configuration root must be a mapping: {config_path}")
-    config = _merge(DEFAULT_CONFIG, loaded)
+    config = _merge(DEFAULT_CONFIG, cast(dict[str, Any], loaded))
     if config.get("version") != 1:
         raise ValueError(f"Unsupported configuration version: {config.get('version')!r}")
     for key in ("port", "telemetry_port"):

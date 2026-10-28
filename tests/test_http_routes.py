@@ -39,7 +39,7 @@ class ViewerRouteTests(unittest.TestCase):
             ("/api/site-config", b"world_map.coins"),
             ("/world-map", b"/assets/world-map.css"),
             ("/world-map/debug", b"/assets/world-map.js"),
-            ("/assets/core/modules.js", b"activateModules"),
+            ("/assets/app-shell.js", "Карта мира".encode("utf-8")),
             ("/assets/world-map.js", b"world_map.debug"),
         ]
         for path, expected in checks:
@@ -59,9 +59,9 @@ class ViewerRouteTests(unittest.TestCase):
     def test_wiki_cache_serves_cached_boss_image(self) -> None:
         image_url = "https://terraria.wiki.gg/images/King_Slime.gif?1becd1"
         digest = hashlib.sha256(image_url.encode("utf-8")).hexdigest()
-        self.store._boss_cache_dir.mkdir(parents=True, exist_ok=True)
-        (self.store._boss_cache_dir / f"{digest}.body").write_bytes(b"GIF89a test image")
-        (self.store._boss_cache_dir / f"{digest}.json").write_text(
+        self.store.boss_cache_directory.mkdir(parents=True, exist_ok=True)
+        (self.store.boss_cache_directory / f"{digest}.body").write_bytes(b"GIF89a test image")
+        (self.store.boss_cache_directory / f"{digest}.json").write_text(
             json.dumps({"stored_at": __import__("time").time(), "content_type": "image/gif"}),
             encoding="utf-8",
         )

@@ -1,18 +1,21 @@
+# Player session snapshots are persisted JSON with legacy optional fields.
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 from __future__ import annotations
 
 from ..store_common import (
     Any,
+    StoreMixinContract,
     GAME_PORT,
     HISTORY_RETENTION_SECONDS,
     HISTORY_SAMPLE_INTERVAL,
     VPS_HOST,
     VPS_IP,
-    _is_valid_player_name,
+    is_valid_player_name,
     time,
 )
 
 
-class MonitoringMixin:
+class MonitoringMixin(StoreMixinContract):
     def set_players_online(
         self, count: int, players: list[dict[str, Any]] | None = None, *, world: dict[str, Any] | None = None
     ) -> None:
@@ -20,7 +23,7 @@ class MonitoringMixin:
         with self._lock:
             valid_players = [
                 player for player in players or []
-                if isinstance(player, dict) and _is_valid_player_name(player.get("name"))
+                if is_valid_player_name(player.get("name"))
             ] if players is not None else None
             self._players_online = len(valid_players) if valid_players is not None else max(0, count)
             self._player_names = [str(player.get("name", "")).strip() for player in valid_players] if valid_players is not None else None
@@ -30,7 +33,7 @@ class MonitoringMixin:
                 # Discard placeholder sessions from older monitor versions;
                 # they are transient Terraria connection slots, not players.
                 for player_id, record in list(self._players.items()):
-                    if not _is_valid_player_name(record.get("name")):
+                    if not is_valid_player_name(record.get("name")):
                         self._players.pop(player_id, None)
                 seen_ids: set[str] = set()
                 for player in valid_players:

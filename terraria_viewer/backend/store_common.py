@@ -15,13 +15,10 @@ import struct
 import subprocess
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -55,16 +52,117 @@ VPS_IP = "5.187.0.105"
 GAME_PORT = 7777
 WORLD_MAP_CHUNK_SIZE = 64
 WORLD_MAP_EXPLORATION_DIR = HOME / "Library/Application Support/TerrariaTunnel/world-exploration"
+__all__ = [
+    "AVATAR_RENDERER_VERSION", "BOSS_CACHE_DIR", "EVENTS_FILE", "GAME_LOG", "GAME_PORT",
+    "HISTORY_FILE", "HISTORY_RETENTION_SECONDS", "HISTORY_SAMPLE_INTERVAL", "HOME",
+    "MAP_SPRITES_DIR", "METRICS_FILE", "NPC_SPRITES_DIR", "NPC_TEXTURES_DIR",
+    "PLAYER_AVATARS_DIR", "PLAYER_MOVEMENTS_DIR", "PLAYER_NAME_PLACEHOLDERS",
+    "PLAYERS_FILE", "SPRITE_RENDERER_CACHE", "SPRITE_RENDERER_SOURCE",
+    "TERRARIA_CLIENT_IMAGES", "VPS_HOST", "VPS_IP", "WORLD_MAP_CHUNK_SIZE",
+    "WORLD_MAP_EXPLORATION_DIR", "WORLD_MAP_FILE", "Any", "Path", "StoreMixinContract",
+    "as_json_array", "as_json_object", "base64", "cast", "decode_player_map", "draw_route_mask",
+    "encode_player_map_rows", "hashlib", "html", "is_valid_player_name", "is_valid_png",
+    "json", "math", "parse_qs", "re", "read_map_mask_png", "shutil", "struct",
+    "subprocess", "threading", "time", "ThreadingHTTPServer", "BaseHTTPRequestHandler",
+    "union_map_masks", "urlsplit", "zlib",
+]
+
+
 PLAYER_NAME_PLACEHOLDERS = {
     ".", "..", "...", "сервер запущен", "сервер работает", "server started", "server is running",
 }
+
+
+class StoreMixinContract(Protocol):
+    """Shared state and collaborators available to every StatusStore mixin."""
+
+    _lock: Any
+    WARNING_MARKERS: tuple[str, ...]
+    _events_file: Path
+    _history_file: Path
+    _players_file: Path
+    _metrics_file: Path
+    _avatars_dir: Path
+    _npc_sprites_dir: Path
+    _npc_textures_dir: Path
+    _map_sprites_dir: Path
+    _movements_dir: Path
+    _exploration_dir: Path
+    _world_map_cache_file: Path
+    _boss_cache_dir: Path
+    _boss_cache_lock: Any
+    _sprite_renderer_lock: Any
+    _coin_sprite_cache: dict[int, str | None]
+    _world_map_cache: dict[str, dict[str, Any]]
+    _world_map_cache_dirty: bool
+    _world_map_cache_last_saved_at: float
+    _events: list[dict[str, Any]]
+    _history: list[dict[str, Any]]
+    _players: dict[str, dict[str, Any]]
+    _movement_cache: dict[str, dict[str, Any]]
+    _movement_visited_tiles: dict[tuple[str, str], set[str]]
+    _online_player_ids: list[str]
+    _players_updated_at: float | None
+    _server_info: dict[str, Any]
+    _host_metrics: dict[str, Any]
+    _game_started_at: float | None
+    _tunnel_started_at: float | None
+    _tunnel_reconnecting: bool
+    _network_interface: str | None
+    _network_gateway: str | None
+    _vpn_active: bool
+    _game_running: bool
+    _listener_up: bool
+    _tunnel_ready: bool
+    _players_online: int | None
+    _player_names: list[str] | None
+    _players_checked_at: float | None
+    _telemetry_received_at: float | None
+    _active_npcs: list[dict[str, Any]]
+    _active_npcs_world_id: str | None
+    _active_coins: list[dict[str, Any]]
+    _active_coins_world_id: str | None
+    _updated_at: float
+
+    def _append_event_locked(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _save_events_locked(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _save_history_locked(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _save_players_locked(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _save_world_map_cache_if_due(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _world_map_cache_key(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _merge_map_capture(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _merge_tile_capture(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _load_movement(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _save_movement(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _world_movement_record(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _appearance_signature(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _position_from_player(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _merge_player_movement(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _record_player_movement(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _record_legacy_movement(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _write_player_sprite(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _write_npc_sprite(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _write_map_coin_sprite(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _severity(self, *args: Any, **kwargs: Any) -> Any: ...
+    def set_players_online(self, *args: Any, **kwargs: Any) -> Any: ...
+    def world_map_summary(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+def as_json_object(value: Any) -> dict[str, Any]:
+    """Return an object-shaped JSON value without leaking unknown key/value types."""
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
+
+
+def as_json_array(value: Any) -> list[Any]:
+    """Return an array-shaped JSON value while preserving its dynamically typed items."""
+    return cast(list[Any], value) if isinstance(value, list) else []
 
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
     return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
 
 
-def _is_valid_png(data: bytes) -> bool:
+def is_valid_png(data: bytes) -> bool:
     """Check PNG structure and chunk checksums before advertising an image URL."""
     if len(data) < 45 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
         return False
@@ -98,9 +196,9 @@ def _is_valid_png(data: bytes) -> bool:
     return saw_header and saw_image_data and saw_end
 
 
-def _read_map_mask_png(data: bytes) -> tuple[int, int, bytearray]:
+def read_map_mask_png(data: bytes) -> tuple[int, int, bytearray]:
     """Read the simple RGBA/filter-0 PNG masks produced by this module."""
-    if not _is_valid_png(data):
+    if not is_valid_png(data):
         raise ValueError("Сохранённая маска карты повреждена.")
     offset = 8
     width = height = 0
@@ -148,9 +246,9 @@ def _write_map_mask_png(width: int, height: int, rgba: bytearray) -> bytes:
     )
 
 
-def _union_map_masks(existing_png: bytes, incoming_png: bytes, width: int, height: int) -> tuple[bytes, int]:
-    old_width, old_height, old_rgba = _read_map_mask_png(existing_png)
-    new_width, new_height, new_rgba = _read_map_mask_png(incoming_png)
+def union_map_masks(existing_png: bytes, incoming_png: bytes, width: int, height: int) -> tuple[bytes, int]:
+    old_width, old_height, old_rgba = read_map_mask_png(existing_png)
+    new_width, new_height, new_rgba = read_map_mask_png(incoming_png)
     if (old_width, old_height) != (new_width, new_height) or (new_width, new_height) != (width, height):
         raise ValueError("Размер сохранённой карты не совпадает с новой картой этого мира.")
     opened_tiles = 0
@@ -163,7 +261,7 @@ def _union_map_masks(existing_png: bytes, incoming_png: bytes, width: int, heigh
     return _write_map_mask_png(old_width, old_height, old_rgba), opened_tiles
 
 
-def _draw_route_mask(
+def draw_route_mask(
     mask: bytearray, mask_width: int, mask_height: int, width: int, height: int,
     positions: list[dict[str, Any]], visited_tiles: list[Any],
 ) -> None:
@@ -224,7 +322,7 @@ def _draw_route_mask(
             mark_point(x, y)
 
 
-def _encode_player_map_rows(mask: bytearray, mask_width: int, mask_height: int, width: int, height: int) -> bytes:
+def encode_player_map_rows(mask: bytearray, mask_width: int, mask_height: int, width: int, height: int) -> bytes:
     """Encode a binary explored mask as Terraria row runs (tile class 1)."""
     output = bytearray()
 
@@ -261,7 +359,7 @@ def _encode_player_map_rows(mask: bytearray, mask_width: int, mask_height: int, 
     return bytes(output)
 
 
-def _decode_player_map(data: bytes) -> tuple[dict[str, Any], bytes, int]:
+def decode_player_map(data: bytes) -> tuple[dict[str, Any], bytes, int]:
     """Decode explored tiles from a Terraria character .map into a quarter-scale PNG mask."""
     if len(data) > 32 * 1024 * 1024 or len(data) < 64:
         raise ValueError("Размер файла карты недопустим.")
@@ -359,7 +457,7 @@ def _decode_player_map(data: bytes) -> tuple[dict[str, Any], bytes, int]:
                 raw_map = full_decoder.decompress(data[candidate:])
                 opened_tiles = 0
                 rgba[:] = b"\0" * len(rgba)
-                exact, consumed = decode_rows(raw_map, True)
+                exact, _ = decode_rows(raw_map, True)
                 if exact and full_decoder.eof:
                     stream_start = candidate
                     break
@@ -377,6 +475,6 @@ def _decode_player_map(data: bytes) -> tuple[dict[str, Any], bytes, int]:
     return {"version": version, "world_name": world_name, "world_id": world_id, "width": width, "height": height, "mask_width": mask_width, "mask_height": mask_height, "stream_offset": stream_start}, png, opened_tiles
 
 
-def _is_valid_player_name(value: Any) -> bool:
+def is_valid_player_name(value: Any) -> bool:
     name = " ".join(str(value or "").split())
     return bool(name) and name.casefold() not in PLAYER_NAME_PLACEHOLDERS

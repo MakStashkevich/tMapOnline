@@ -9,6 +9,8 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from ..backend.store_common import as_json_object
+
 
 SnapshotHandler = Callable[[dict[str, Any]], None]
 ConnectionHandler = Callable[[bool], None]
@@ -80,9 +82,10 @@ class TelemetryStreamClient:
                             snapshot = json.loads(line)
                         except json.JSONDecodeError:
                             continue
-                        if isinstance(snapshot, dict) and snapshot.get("schemaVersion") == 1:
+                        snapshot_object = as_json_object(snapshot)
+                        if snapshot_object.get("schemaVersion") == 1:
                             try:
-                                self._on_snapshot(snapshot)
+                                self._on_snapshot(snapshot_object)
                             except Exception:
                                 logger.exception("Failed to apply tModLoader telemetry snapshot; keeping the stream open.")
                 if not self._stop.is_set():

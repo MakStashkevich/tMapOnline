@@ -1,24 +1,29 @@
+# Map cache payloads retain backwards-compatible JSON shapes and are validated at read sites.
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
 from __future__ import annotations
+
+import urllib.parse
 
 from ..store_common import (
     Any,
     WORLD_MAP_CHUNK_SIZE,
-    _decode_player_map,
-    _draw_route_mask,
-    _encode_player_map_rows,
-    _read_map_mask_png,
-    _union_map_masks,
+    as_json_object,
+    StoreMixinContract,
+    decode_player_map,
+    draw_route_mask,
+    encode_player_map_rows,
+    read_map_mask_png,
+    union_map_masks,
     base64,
     hashlib,
     re,
     struct,
     time,
-    urllib,
     zlib,
 )
 
 
-class WorldMapMixin:
+class WorldMapMixin(StoreMixinContract):
     def world_map_summary(self) -> dict[str, Any]:
         """Compact current-world counters for the on-demand map-data view."""
         with self._lock:
@@ -66,7 +71,7 @@ class WorldMapMixin:
                         "visited_tiles": list(world.get("visited_tiles", [])),
                         "positions": [dict(point) for point in world.get("positions", []) if isinstance(point, dict)],
                     }
-                    for key, world in movement.get("worlds", {}).items()
+                    for key, world in as_json_object(movement.get("worlds")).items()
                 },
             }
 
@@ -116,7 +121,7 @@ class WorldMapMixin:
                     pass
             for player_id, record in self._players.items():
                 movement = self._load_movement(player_id)
-                for key, world in movement.get("worlds", {}).items():
+                for key, world in as_json_object(movement.get("worlds")).items():
                     stored_id = world.get("world_id")
                     name = str(world.get("world_name") or "")
                     if requested and requested not in {str(key), str(stored_id or ""), name}:
@@ -140,7 +145,7 @@ class WorldMapMixin:
                         tile_info_updated_at = max(tile_info_updated_at, float(world.get("tile_info_updated_at", 0)))
                     except (TypeError, ValueError):
                         pass
-                    raw_chunks = world.get("map_chunks") if isinstance(world.get("map_chunks"), dict) else {}
+                    raw_chunks = as_json_object(world.get("map_chunks"))
                     chunks = []
                     for chunk_key, data in raw_chunks.items():
                         try:
@@ -230,7 +235,7 @@ class WorldMapMixin:
                     tile_names.update(selected["tile_names"])
             for player_id in self._players:
                 movement = self._load_movement(player_id)
-                for key, world in movement.get("worlds", {}).items():
+                for key, world in as_json_object(movement.get("worlds")).items():
                     if requested and requested not in {
                         str(key), str(world.get("world_id") or ""), str(world.get("world_name") or "")
                     }:
@@ -278,7 +283,7 @@ class WorldMapMixin:
             }
 
     def import_player_map(self, player_id: str, data: bytes, world_id: str | None = None) -> dict[str, Any]:
-        info, png, opened_tiles = _decode_player_map(data)
+        info, png, opened_tiles = decode_player_map(data)
         if world_id and str(info["world_id"]) != str(world_id):
             raise ValueError("Файл карты относится к другому миру.")
         if info["world_id"] is None:
@@ -306,7 +311,7 @@ class WorldMapMixin:
                 raise ValueError("Имя мира в файле не совпадает с текущим миром.")
             if int(width) != info["width"] or int(height) != info["height"]:
                 raise ValueError("Размер мира в файле не совпадает с текущим миром.")
-            world_key, world = self._world_movement_record(movement, {
+            _world_key, world = self._world_movement_record(movement, {
                 "id": info["world_id"], "name": info["world_name"],
                 "width": info["width"], "height": info["height"],
             })
@@ -326,7 +331,7 @@ class WorldMapMixin:
                     previous_png = target.read_bytes()
                 except OSError as error:
                     raise ValueError("Не удалось прочитать предыдущую карту игрока; она не была заменена.") from error
-                merged_png, merged_opened_tiles = _union_map_masks(
+                merged_png, merged_opened_tiles = union_map_masks(
                     previous_png, png, info["mask_width"], info["mask_height"],
                 )
             temporary = target.with_suffix(".png.tmp")
@@ -351,7 +356,7 @@ class WorldMapMixin:
     def player_exploration_image(self, player_id: str, world_id: str) -> bytes | None:
         with self._lock:
             movement = self._load_movement(player_id)
-            for key, world in movement.get("worlds", {}).items():
+            for key, world in as_json_object(movement.get("worlds")).items():
                 if str(world.get("world_id") or key.split(":", 1)[0]) != str(world_id):
                     continue
                 exploration = world.get("map_exploration")
@@ -376,7 +381,7 @@ class WorldMapMixin:
             movement = self._load_movement(player_id)
             removed = False
             removed_filename = None
-            for world_key, world in movement.get("worlds", {}).items():
+            for world_key, world in as_json_object(movement.get("worlds")).items():
                 if str(world.get("world_id") or str(world_key).split(":", 1)[0]) != str(world_id):
                     continue
                 exploration = world.get("map_exploration")
@@ -393,7 +398,8 @@ class WorldMapMixin:
             if removed:
                 self._save_movement(player_id)
                 try:
-                    (self._exploration_dir / removed_filename).unlink()
+                    if removed_filename is not None:
+                        (self._exploration_dir / removed_filename).unlink()
                 except FileNotFoundError:
                     pass
             player = movement.get("player", {})
@@ -407,7 +413,7 @@ class WorldMapMixin:
             if str(self._server_info.get("world_id") or "") != str(world_id):
                 raise ValueError("Можно скачать карту только для текущего мира сервера.")
             movement = self._load_movement(player_id)
-            world = next((item for key, item in movement.get("worlds", {}).items()
+            world = next((item for key, item in as_json_object(movement.get("worlds")).items()
                           if str(item.get("world_id") or str(key).split(":", 1)[0]) == str(world_id)), None)
             if world is None:
                 raise ValueError("Для этого игрока пока нет сохранённых данных карты.")
@@ -439,14 +445,14 @@ class WorldMapMixin:
         mask_width, mask_height = (width + 3) // 4, (height + 3) // 4
         mask = bytearray(mask_width * mask_height)
         if imported_png is not None:
-            png_width, png_height, rgba = _read_map_mask_png(imported_png)
+            png_width, png_height, rgba = read_map_mask_png(imported_png)
             if (png_width, png_height) != (mask_width, mask_height):
                 raise ValueError("Размер сохранённой карты игрока не совпадает с текущим миром.")
             for index, alpha in enumerate(rgba[3::4]):
                 if alpha:
                     mask[index] = 1
-        _draw_route_mask(mask, mask_width, mask_height, width, height, positions, visited_tiles)
-        raw_map = _encode_player_map_rows(mask, mask_width, mask_height, width, height)
+        draw_route_mask(mask, mask_width, mask_height, width, height, positions, visited_tiles)
+        raw_map = encode_player_map_rows(mask, mask_width, mask_height, width, height)
         compressor = zlib.compressobj(level=6, wbits=-15)
         map_file = header + compressor.compress(raw_map) + compressor.flush()
         safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", player_name).strip("_") or "player"

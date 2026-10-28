@@ -9,6 +9,9 @@ description = "Modular local Terraria world viewer, telemetry service, and tModL
 requires-python = ">=3.9"
 dependencies = ["PyYAML>=6.0,<7"]
 
+[project.optional-dependencies]
+dev = ["types-PyYAML>=6.0"]
+
 [project.scripts]
 terraria-viewer = "terraria_viewer.__main__:main"
 
@@ -18,3 +21,10 @@ include = ["terraria_viewer*"]
 
 [tool.setuptools.package-data]
 terraria_viewer = ["web/**/*.html", "web/**/*.css", "web/**/*.js", "web/**/*.ts", "web/**/*.scss", "sprite_renderer/java/*.java"]
+
+[tool.pyright]
+include = ["terraria_viewer", "tests", "tools"]
+exclude = ["**/__pycache__", "**/node_modules", "**/.venv", "dist", "tmodloader"]
+pythonVersion = "3.9"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false

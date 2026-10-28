@@ -10,7 +10,7 @@ import threading
 import time
 import platform
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .backend.http import ServerLogFollower, start_dashboard
 from .backend.store import StatusStore
@@ -60,7 +60,7 @@ def _server_command(config: dict[str, Any]) -> tuple[list[str], Path]:
 def _read_tunnel_status(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
+        return cast(dict[str, Any], value) if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -73,14 +73,18 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
     store.update(game_running=False, listener_up=False, tunnel_ready=False, game_started_at=None, tunnel_reconnecting=False)
     dashboard = start_dashboard(store, server_config["port"], config.get("site", {}), server_config["host"])
     logger.info("Viewer listening at http://%s:%s", server_config["host"], server_config["port"])
+    def handle_telemetry_connection(connected: bool) -> None:
+        store.set_server_info(telemetry_connected=connected)
+        logger.info("Telemetry %s", "connected" if connected else "disconnected")
+
     telemetry = TelemetryStreamClient(
         store.set_live_telemetry,
-        lambda connected: (store.set_server_info(telemetry_connected=connected), logger.info("Telemetry %s", "connected" if connected else "disconnected")),
+        handle_telemetry_connection,
         host=server_config["telemetry_host"],
         port=server_config["telemetry_port"],
     )
     telemetry.start()
-    game_process: subprocess.Popen[str] | None = None
+    game_process: subprocess.Popen[bytes] | None = None
     game_log_handle = None
     game_started = time.time() if run_game else None
     try:
@@ -90,7 +94,7 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_follower = ServerLogFollower(log_path)
             game_log_handle = log_path.open("a", encoding="utf-8", buffering=1)
-            game_process = subprocess.Popen(
+            started_process = subprocess.Popen(
                 command,
                 cwd=cwd,
                 stdin=subprocess.PIPE,
@@ -98,7 +102,8 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-            logger.info("Started local tModLoader process %s; SSH tunnel is not managed here.", game_process.pid)
+            game_process = started_process
+            logger.info("Started local tModLoader process %s; SSH tunnel is not managed here.", started_process.pid)
         else:
             log_follower = None
 

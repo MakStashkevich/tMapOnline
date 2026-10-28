@@ -5,8 +5,12 @@ from ..store_common import (
     SPRITE_RENDERER_CACHE,
     SPRITE_RENDERER_SOURCE,
     TERRARIA_CLIENT_IMAGES,
-    _is_valid_player_name,
-    _is_valid_png,
+    StoreMixinContract,
+    as_json_array,
+    cast,
+    as_json_object,
+    is_valid_player_name,
+    is_valid_png,
     hashlib,
     json,
     re,
@@ -16,7 +20,7 @@ from ..store_common import (
 )
 
 
-class LiveTelemetryMixin:
+class LiveTelemetryMixin(StoreMixinContract):
     def _save_metrics_locked(self) -> None:
         self._metrics_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         temporary = self._metrics_file.with_suffix(".tmp")
@@ -36,16 +40,15 @@ class LiveTelemetryMixin:
 
     def set_live_telemetry(self, snapshot: dict[str, Any]) -> None:
         """Apply one trusted-local tModLoader telemetry snapshot to monitor storage."""
-        server = snapshot.get("server") if isinstance(snapshot.get("server"), dict) else {}
-        world = snapshot.get("world") if isinstance(snapshot.get("world"), dict) else {}
-        raw_npcs = world.get("activeNpcs") if isinstance(world.get("activeNpcs"), list) else []
+        server = as_json_object(snapshot.get("server"))
+        world = as_json_object(snapshot.get("world"))
+        raw_npcs = as_json_array(world.get("activeNpcs"))
         active_npcs: list[dict[str, Any]] = []
-        for npc in raw_npcs:
-            if not isinstance(npc, dict):
-                continue
+        for npc_value in raw_npcs:
+            npc = as_json_object(npc_value)
             try:
-                x, y = int(npc.get("x")), int(npc.get("y"))
-                npc_type = int(npc.get("type"))
+                x, y = int(cast(Any, npc.get("x"))), int(cast(Any, npc.get("y")))
+                npc_type = int(cast(Any, npc.get("type")))
                 frame_width = max(1, min(1024, int(npc.get("frameWidth", 32))))
                 frame_height = max(1, min(1024, int(npc.get("frameHeight", 32))))
                 head_slot = int(npc.get("headSlot", -1))
@@ -71,13 +74,12 @@ class LiveTelemetryMixin:
                 "icon_url": icon_url,
             })
         coin_names = {71: "Медная монета", 72: "Серебряная монета", 73: "Золотая монета", 74: "Платиновая монета"}
-        raw_coins = world.get("droppedCoins") if isinstance(world.get("droppedCoins"), list) else []
+        raw_coins = as_json_array(world.get("droppedCoins"))
         active_coins: list[dict[str, Any]] = []
-        for coin in raw_coins:
-            if not isinstance(coin, dict):
-                continue
+        for coin_value in raw_coins:
+            coin = as_json_object(coin_value)
             try:
-                item_type, x, y, stack = int(coin.get("type")), int(coin.get("x")), int(coin.get("y")), int(coin.get("stack"))
+                item_type, x, y, stack = int(cast(Any, coin.get("type"))), int(cast(Any, coin.get("x"))), int(cast(Any, coin.get("y"))), int(cast(Any, coin.get("stack")))
             except (TypeError, ValueError, OverflowError):
                 continue
             if item_type not in coin_names or x < 0 or y < 0 or stack < 1:
@@ -98,11 +100,15 @@ class LiveTelemetryMixin:
             self._active_npcs_world_id = str(world_id) if world_id is not None else None
             self._active_coins = active_coins
             self._active_coins_world_id = str(world_id) if world_id is not None else None
-        mode = world.get("gameMode") if isinstance(world.get("gameMode"), dict) else {}
-        players = snapshot.get("players") if isinstance(snapshot.get("players"), dict) else {}
-        player_list = players.get("list") if isinstance(players.get("list"), list) else []
-        normalized_players = [
-            {
+        mode = as_json_object(world.get("gameMode"))
+        players = as_json_object(snapshot.get("players"))
+        player_list = as_json_array(players.get("list"))
+        normalized_players: list[dict[str, Any]] = []
+        for player_value in player_list:
+            player = as_json_object(player_value)
+            if not player or not is_valid_player_name(player.get("name")):
+                continue
+            normalized_players.append({
                 "name": str(player.get("name", "")),
                 "uuid": player.get("uuid"),
                 "joined_at": player.get("joinedAtUnix"),
@@ -111,19 +117,15 @@ class LiveTelemetryMixin:
                 "teleported": player.get("teleported") is True,
                 "mapCapture": player.get("mapCapture"),
                 "appearance": player.get("appearance"),
-            }
-            for player in player_list
-            if isinstance(player, dict) and _is_valid_player_name(player.get("name"))
-        ]
+            })
         self.set_players_online(len(normalized_players), normalized_players, world=world)
-        raw_pylons = snapshot.get("pylons")
-        if isinstance(raw_pylons, list):
-            pylons = []
-            for pylon in raw_pylons:
-                if not isinstance(pylon, dict):
-                    continue
+        raw_pylons = as_json_array(snapshot.get("pylons"))
+        if raw_pylons:
+            pylons: list[dict[str, Any]] = []
+            for pylon_value in raw_pylons:
+                pylon = as_json_object(pylon_value)
                 try:
-                    x, y = int(pylon.get("x")), int(pylon.get("y"))
+                    x, y = int(cast(Any, pylon.get("x"))), int(cast(Any, pylon.get("y")))
                 except (TypeError, ValueError):
                     continue
                 pylon_type = str(pylon.get("type") or "").strip()
@@ -144,7 +146,7 @@ class LiveTelemetryMixin:
                     "pylons": [],
                 })
                 try:
-                    spawn_x, spawn_y = int(world.get("spawnX")), int(world.get("spawnY"))
+                    spawn_x, spawn_y = int(cast(Any, world.get("spawnX"))), int(cast(Any, world.get("spawnY")))
                 except (TypeError, ValueError):
                     spawn_x = spawn_y = None
                 if spawn_x is not None and spawn_y is not None:
@@ -156,8 +158,8 @@ class LiveTelemetryMixin:
                     world_cache["pylons"] = pylons
                     self._world_map_cache_dirty = True
                 self._save_world_map_cache_if_due()
-        base_captures = snapshot.get("baseMapCaptures")
-        if isinstance(base_captures, list) and base_captures:
+        base_captures = as_json_array(snapshot.get("baseMapCaptures"))
+        if base_captures:
             with self._lock:
                 cache_key = self._world_map_cache_key(world)
                 world_cache = self._world_map_cache.setdefault(cache_key, {
@@ -192,7 +194,11 @@ class LiveTelemetryMixin:
             world_id=world.get("id"),
             world_width=world.get("width"),
             world_height=world.get("height"),
-            map_scan=snapshot.get("mapScan") if isinstance(snapshot.get("mapScan"), dict) else None,
+            map_scan=(
+                as_json_object(snapshot.get("mapScan"))
+                if isinstance(snapshot.get("mapScan"), dict)
+                else None
+            ),
             game_mode=mode.get("name"),
             game_mode_id=mode.get("id"),
             hardmode=world.get("hardmode"),
@@ -226,7 +232,7 @@ class LiveTelemetryMixin:
         output = self._map_sprites_dir / f"coin-{item_type}.png"
         if output.is_file():
             try:
-                if _is_valid_png(output.read_bytes()):
+                if is_valid_png(output.read_bytes()):
                     result = f"/map-sprites/coin-{item_type}.png"
                     self._coin_sprite_cache[item_type] = result
                     return result
@@ -268,7 +274,7 @@ class LiveTelemetryMixin:
                      str(source), str(output)],
                     capture_output=True, text=True, timeout=20, check=False,
                 )
-                if rendered.returncode != 0 or not output.is_file() or not _is_valid_png(output.read_bytes()):
+                if rendered.returncode != 0 or not output.is_file() or not is_valid_png(output.read_bytes()):
                     output.unlink(missing_ok=True)
                     return None
         except (OSError, subprocess.SubprocessError, ValueError):
@@ -327,7 +333,7 @@ class LiveTelemetryMixin:
         output = self._npc_sprites_dir / f"{digest}.png"
         if output.is_file():
             try:
-                if not _is_valid_png(output.read_bytes()):
+                if not is_valid_png(output.read_bytes()):
                     output.unlink()
             except OSError:
                 return None
@@ -369,7 +375,7 @@ class LiveTelemetryMixin:
                          str(source), str(output), str(frame_width), str(frame_height), str(head_texture).lower()],
                         capture_output=True, text=True, timeout=20, check=False,
                     )
-                    if rendered.returncode != 0 or not output.is_file() or not _is_valid_png(output.read_bytes()):
+                    if rendered.returncode != 0 or not output.is_file() or not is_valid_png(output.read_bytes()):
                         output.unlink(missing_ok=True)
                         if head_texture:
                             return self._write_npc_sprite(npc_type, texture_hash, body_frame_width, body_frame_height)

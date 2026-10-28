@@ -1,13 +1,19 @@
+# Player records are persisted as versioned, extensible JSON dictionaries.
+# Runtime shape checks protect the fields used by this service.
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
 from __future__ import annotations
 
 from ..store_common import (
     Any,
+    as_json_array,
+    as_json_object,
+    StoreMixinContract,
     HISTORY_RETENTION_SECONDS,
     Path,
     SPRITE_RENDERER_CACHE,
     SPRITE_RENDERER_SOURCE,
     TERRARIA_CLIENT_IMAGES,
-    _is_valid_player_name,
+    is_valid_player_name,
     hashlib,
     json,
     re,
@@ -17,12 +23,11 @@ from ..store_common import (
 )
 
 
-class PlayerHistoryMixin:
+class PlayerHistoryMixin(StoreMixinContract):
     def _load_events(self) -> None:
         try:
-            loaded = json.loads(self._events_file.read_text(encoding="utf-8"))
-            if isinstance(loaded, list):
-                self._events = [self._normalize_event(event) for event in loaded if isinstance(event, dict)]
+            loaded = as_json_array(json.loads(self._events_file.read_text(encoding="utf-8")))
+            self._events = [self._normalize_event(as_json_object(event)) for event in loaded if isinstance(event, dict)]
         except (OSError, ValueError, TypeError):
             self._events = []
 
@@ -46,8 +51,8 @@ class PlayerHistoryMixin:
 
     def _load_history(self) -> None:
         try:
-            loaded = json.loads(self._history_file.read_text(encoding="utf-8"))
-            if isinstance(loaded, list):
+            loaded = as_json_array(json.loads(self._history_file.read_text(encoding="utf-8")))
+            if loaded:
                 cutoff = time.time() - HISTORY_RETENTION_SECONDS
                 self._history = [
                     item for item in loaded
@@ -60,16 +65,16 @@ class PlayerHistoryMixin:
 
     def _load_players(self) -> None:
         try:
-            loaded = json.loads(self._players_file.read_text(encoding="utf-8"))
-            records = loaded.get("players", {}) if isinstance(loaded, dict) else {}
-            if isinstance(loaded, dict):
+            loaded = as_json_object(json.loads(self._players_file.read_text(encoding="utf-8")))
+            records = as_json_object(loaded.get("players", {}))
+            if loaded:
                 self._players_updated_at = loaded.get("updated_at")
-            if isinstance(records, dict):
+            if records:
                 self._players = {
                     str(key): value for key, value in records.items()
                     if isinstance(value, dict)
                     and isinstance(value.get("sessions", []), list)
-                    and _is_valid_player_name(value.get("name"))
+                    and is_valid_player_name(value.get("name"))
                 }
             for player_id, record in self._players.items():
                 avatar_digest = hashlib.sha256(player_id.encode("utf-8")).hexdigest()[:32]
@@ -119,8 +124,8 @@ class PlayerHistoryMixin:
 
     def _load_metrics(self) -> None:
         try:
-            loaded = json.loads(self._metrics_file.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
+            loaded = as_json_object(json.loads(self._metrics_file.read_text(encoding="utf-8")))
+            if loaded:
                 self._server_info.update(loaded.get("server", {}))
                 self._host_metrics = loaded.get("host", {}) if isinstance(loaded.get("host"), dict) else {}
         except (OSError, ValueError, TypeError):

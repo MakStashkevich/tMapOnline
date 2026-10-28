@@ -1,3 +1,6 @@
+# Persisted player movement is deliberately schema-flexible across older JSON versions.
+# Values are shape-checked at each read boundary before use.
+# pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false
 from __future__ import annotations
 
 from ..store_common import (
@@ -5,6 +8,8 @@ from ..store_common import (
     Any,
     Path,
     WORLD_MAP_CHUNK_SIZE,
+    as_json_object,
+    StoreMixinContract,
     base64,
     hashlib,
     json,
@@ -14,7 +19,7 @@ from ..store_common import (
 )
 
 
-class MovementMixin:
+class MovementMixin(StoreMixinContract):
     @staticmethod
     def _appearance_signature(appearance: Any) -> str:
         try:
@@ -31,7 +36,8 @@ class MovementMixin:
     @staticmethod
     def _position_from_player(player: dict[str, Any]) -> tuple[int, int] | None:
         position = player.get("position")
-        if not isinstance(position, dict):
+        position = as_json_object(position)
+        if not position:
             return None
         try:
             x, y = int(position["tileX"]), int(position["tileY"])
@@ -47,19 +53,18 @@ class MovementMixin:
         if player_id in self._movement_cache:
             return self._movement_cache[player_id]
         try:
-            loaded = json.loads(self._movement_path(player_id).read_text(encoding="utf-8"))
-            movement = loaded if isinstance(loaded, dict) else {}
+            movement = as_json_object(json.loads(self._movement_path(player_id).read_text(encoding="utf-8")))
         except (OSError, ValueError, TypeError):
             movement = {}
         movement.setdefault("schema_version", 1)
         movement.setdefault("player", {"id": player_id})
         movement.setdefault("worlds", {})
-        if not isinstance(movement["worlds"], dict):
-            movement["worlds"] = {}
-        for world_key, world_data in movement["worlds"].items():
-            if not isinstance(world_data, dict):
-                movement["worlds"][world_key] = {"visited_tiles": [], "positions": []}
-                world_data = movement["worlds"][world_key]
+        movement["worlds"] = as_json_object(movement["worlds"])
+        for world_key, raw_world_data in movement["worlds"].items():
+            world_data = as_json_object(raw_world_data)
+            if not world_data:
+                world_data = {"visited_tiles": [], "positions": []}
+                movement["worlds"][world_key] = world_data
             world_data.setdefault("visited_tiles", [])
             world_data.setdefault("positions", [])
             self._movement_visited_tiles[(player_id, str(world_key))] = set(world_data["visited_tiles"])
@@ -77,9 +82,9 @@ class MovementMixin:
 
     def _load_world_map_cache(self) -> None:
         try:
-            loaded = json.loads(self._world_map_cache_file.read_text(encoding="utf-8"))
-            worlds = loaded.get("worlds") if isinstance(loaded, dict) else None
-            if isinstance(worlds, dict):
+            loaded = as_json_object(json.loads(self._world_map_cache_file.read_text(encoding="utf-8")))
+            worlds = as_json_object(loaded.get("worlds"))
+            if worlds:
                 self._world_map_cache = {
                     str(key): value for key, value in worlds.items()
                     if isinstance(value, dict)
@@ -142,7 +147,8 @@ class MovementMixin:
         # Some teleport items/mods synchronize the position without calling
         # Player.Teleport on the server. Detect physically implausible jumps as
         # a fallback; ordinary falling/flight remains under this speed limit.
-        if isinstance(last, dict):
+        last = as_json_object(last)
+        if last:
             distance = math.hypot(tile_x - int(last.get("x", tile_x)), tile_y - int(last.get("y", tile_y)))
             world_width = int(world_data.get("width") or 0)
             try:
@@ -161,7 +167,7 @@ class MovementMixin:
             visited.add(tile_key)
             world_data["visited_tiles"].append(tile_key)
             changed = True
-        if not isinstance(last, dict) or last.get("x") != tile_x or last.get("y") != tile_y:
+        if not last or last.get("x") != tile_x or last.get("y") != tile_y:
             point = {"time": now, "x": tile_x, "y": tile_y}
             if is_teleport:
                 point["teleport"] = True
@@ -220,7 +226,7 @@ class MovementMixin:
                     target_start = ((world_y - chunk_y * chunk_size) * chunk_size + left - chunk_x * chunk_size) * 4
                     source_row = pixels[source_start:source_start + copy_bytes]
                     target_row = target[target_start:target_start + copy_bytes]
-                    if target_row != source_row:
+                    if bytes(target_row) != source_row:
                         target[target_start:target_start + copy_bytes] = source_row
                         chunk_changed = True
 
@@ -297,7 +303,7 @@ class MovementMixin:
                     source_start = ((world_y - y) * width + left - x) * 4
                     target_start = ((world_y - chunk_y * chunk_size) * chunk_size + left - chunk_x * chunk_size) * 4
                     row = raw[source_start:source_start + row_bytes]
-                    if target[target_start:target_start + row_bytes] != row:
+                    if bytes(target[target_start:target_start + row_bytes]) != row:
                         target[target_start:target_start + row_bytes] = row
                         chunk_changed = True
                         changed = True
