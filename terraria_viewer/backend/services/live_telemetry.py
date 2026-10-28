@@ -4,8 +4,6 @@ from ...models import LiveTelemetrySnapshot, NpcEntity
 
 from ..store_common import (
     Any,
-    SPRITE_RENDERER_CACHE,
-    SPRITE_RENDERER_SOURCE,
     TERRARIA_CLIENT_IMAGES,
     cast,
     StoreMixinContract,
@@ -14,8 +12,6 @@ from ..store_common import (
     hashlib,
     json,
     re,
-    shutil,
-    subprocess,
     time,
 )
 
@@ -168,45 +164,13 @@ class LiveTelemetryMixin(StoreMixinContract):
                 output.unlink()
             except OSError:
                 return None
-        java, javac = shutil.which("java"), shutil.which("javac")
-        if not java or not javac:
-            return None
         try:
             with self._sprite_renderer_lock:
-                classes = SPRITE_RENDERER_CACHE / "classes"
-                class_file = classes / "com/github/antag99/textract/extract/TerrariaMapItemSpriteRenderer.class"
-                sources = [
-                    SPRITE_RENDERER_SOURCE / "LzxDecoder.java",
-                    SPRITE_RENDERER_SOURCE / "TerrariaPlayerSpriteRenderer.java",
-                    SPRITE_RENDERER_SOURCE / "TerrariaNpcSpriteRenderer.java",
-                    SPRITE_RENDERER_SOURCE / "TerrariaMapItemSpriteRenderer.java",
-                ]
-                stamp = max(path.stat().st_mtime_ns for path in sources)
-                stamp_file = SPRITE_RENDERER_CACHE / "source-stamp"
-                try:
-                    compiled_stamp = int(stamp_file.read_text(encoding="ascii"))
-                except (OSError, ValueError):
-                    compiled_stamp = 0
-                if not class_file.is_file() or compiled_stamp != stamp:
-                    classes.mkdir(mode=0o700, parents=True, exist_ok=True)
-                    compiled = subprocess.run(
-                        [javac, "-d", str(classes), *(str(path) for path in sources)],
-                        capture_output=True, text=True, timeout=45, check=False,
-                    )
-                    if compiled.returncode != 0:
-                        return None
-                    stamp_file.write_text(str(stamp), encoding="ascii")
-                self._map_sprites_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                rendered = subprocess.run(
-                    [java, "-Djava.awt.headless=true", "-cp", str(classes),
-                     "com.github.antag99.textract.extract.TerrariaMapItemSpriteRenderer",
-                     str(source), str(output)],
-                    capture_output=True, text=True, timeout=20, check=False,
-                )
-                if rendered.returncode != 0 or not output.is_file() or not is_valid_png(output.read_bytes()):
+                self._map_item_sprite_renderer.render(source, output)
+                if not output.is_file() or not is_valid_png(output.read_bytes()):
                     output.unlink(missing_ok=True)
                     return None
-        except (OSError, subprocess.SubprocessError, ValueError):
+        except (OSError, ValueError):
             return None
         result = f"/map-sprites/coin-{item_type}.png"
         self._coin_sprite_cache[item_type] = result
@@ -258,7 +222,7 @@ class LiveTelemetryMixin(StoreMixinContract):
             return None
         # Include the renderer revision so existing full-body icons are replaced
         # automatically after deploying the head-portrait crop.
-        digest = hashlib.sha256(f"head-portrait-outline-v6:{source_key}:{frame_width}x{frame_height}".encode("utf-8")).hexdigest()[:32]
+        digest = hashlib.sha256(f"python-head-portrait-outline-v7:{source_key}:{frame_width}x{frame_height}".encode("utf-8")).hexdigest()[:32]
         output = self._npc_sprites_dir / f"{digest}.png"
         if output.is_file():
             try:
@@ -267,49 +231,21 @@ class LiveTelemetryMixin(StoreMixinContract):
             except OSError:
                 return None
         if not output.is_file():
-            java, javac = shutil.which("java"), shutil.which("javac")
-            if not java or not javac:
-                return None
             try:
                 with self._sprite_renderer_lock:
-                    classes = SPRITE_RENDERER_CACHE / "classes"
-                    class_file = classes / "com/github/antag99/textract/extract/TerrariaNpcSpriteRenderer.class"
-                    sources = [
-                        SPRITE_RENDERER_SOURCE / "LzxDecoder.java",
-                        SPRITE_RENDERER_SOURCE / "TerrariaPlayerSpriteRenderer.java",
-                        SPRITE_RENDERER_SOURCE / "TerrariaNpcSpriteRenderer.java",
-                        SPRITE_RENDERER_SOURCE / "TerrariaMapItemSpriteRenderer.java",
-                    ]
-                    stamp = max(path.stat().st_mtime_ns for path in sources)
-                    stamp_file = SPRITE_RENDERER_CACHE / "source-stamp"
-                    try:
-                        compiled_stamp = int(stamp_file.read_text(encoding="ascii"))
-                    except (OSError, ValueError):
-                        compiled_stamp = 0
-                    if not class_file.is_file() or compiled_stamp != stamp:
-                        classes.mkdir(mode=0o700, parents=True, exist_ok=True)
-                        compiled = subprocess.run(
-                            [javac, "-d", str(classes), *(str(path) for path in sources)],
-                            capture_output=True, text=True, timeout=45, check=False,
-                        )
-                        if compiled.returncode != 0:
-                            if head_texture:
-                                return self._write_npc_sprite(npc_type, texture_hash, body_frame_width, body_frame_height)
-                            return None
-                        stamp_file.write_text(str(stamp), encoding="ascii")
-                    self._npc_sprites_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                    rendered = subprocess.run(
-                        [java, "-Djava.awt.headless=true", "-cp", str(classes),
-                         "com.github.antag99.textract.extract.TerrariaNpcSpriteRenderer",
-                         str(source), str(output), str(frame_width), str(frame_height), str(head_texture).lower()],
-                        capture_output=True, text=True, timeout=20, check=False,
+                    self._npc_sprite_renderer.render(
+                        source,
+                        output,
+                        frame_width,
+                        frame_height,
+                        head_texture,
                     )
-                    if rendered.returncode != 0 or not output.is_file() or not is_valid_png(output.read_bytes()):
+                    if not output.is_file() or not is_valid_png(output.read_bytes()):
                         output.unlink(missing_ok=True)
                         if head_texture:
                             return self._write_npc_sprite(npc_type, texture_hash, body_frame_width, body_frame_height)
                         return None
-            except (OSError, subprocess.SubprocessError, ValueError):
+            except (OSError, ValueError):
                 if head_texture:
                     return self._write_npc_sprite(npc_type, texture_hash, body_frame_width, body_frame_height)
                 return None

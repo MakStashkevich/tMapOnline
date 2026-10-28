@@ -39,4 +39,4 @@ npm run check:web
 
 Сборка выпускает минифицированные ES-модули и CSS в `terraria_viewer/web/assets`; Python раздаёт их без Node.js в рабочем окружении. Разделы карты, игроков, боссов, сервера и событий остаются отдельными динамическими чанками со своими CSS-файлами.
 
-Состав страниц и отдельных UI-компонентов сделан конфигурируемым по мотивам [Dynmap](https://dynmap.wiki.gg/wiki/Component_Configuration), [BlueMap Webapp](https://github.com/BlueMap-Minecraft/BlueMapWiki/blob/master/wiki/configs/Webapp.md) и [squaremap](https://github.com/jpenilla/squaremap/wiki/Default-config.yml).
+Состав страниц и отдельных UI-компонентов задаётся конфигурацией приложения; это позволяет отключать ненужные разделы без изменения кода.

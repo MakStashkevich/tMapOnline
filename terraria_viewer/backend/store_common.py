@@ -41,8 +41,6 @@ TERRARIA_CLIENT_IMAGES = Path(os.environ.get(
     "TERRARIA_CLIENT_IMAGES",
     str(HOME / "Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Content/Images"),
 ))
-SPRITE_RENDERER_SOURCE = Path(__file__).resolve().parents[1] / "sprite_renderer" / "java"
-SPRITE_RENDERER_CACHE = HOME / "Library/Caches/TerrariaTunnel/player-sprite-renderer"
 PLAYER_MOVEMENTS_DIR = HOME / "Library/Application Support/TerrariaTunnel/player-movements"
 BOSS_CACHE_DIR = HOME / "Library/Application Support/TerrariaTunnel/boss-cache"
 HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
@@ -59,7 +57,7 @@ __all__ = [
     "HISTORY_FILE", "HISTORY_RETENTION_SECONDS", "HISTORY_SAMPLE_INTERVAL", "HOME",
     "MAP_SPRITES_DIR", "METRICS_FILE", "NPC_SPRITES_DIR", "NPC_TEXTURES_DIR",
     "PLAYER_AVATARS_DIR", "PLAYER_MOVEMENTS_DIR", "PLAYER_NAME_PLACEHOLDERS",
-    "PLAYERS_FILE", "SPRITE_RENDERER_CACHE", "SPRITE_RENDERER_SOURCE",
+    "PLAYERS_FILE",
     "TERRARIA_CLIENT_IMAGES", "VPS_HOST", "VPS_IP", "WORLD_MAP_CHUNK_SIZE",
     "WORLD_MAP_EXPLORATION_DIR", "WORLD_MAP_FILE", "Any", "Path", "StoreMixinContract",
     "as_json_array", "as_json_object", "base64", "cast", "decode_player_map", "draw_route_mask",
@@ -94,6 +92,9 @@ class StoreMixinContract(Protocol):
     _boss_cache_dir: Path
     _boss_cache_lock: Any
     _sprite_renderer_lock: Any
+    _player_sprite_renderer: Any
+    _npc_sprite_renderer: Any
+    _map_item_sprite_renderer: Any
     _coin_sprite_cache: dict[int, str | None]
     _world_map_cache: dict[str, dict[str, Any]]
     _world_map_cache_dirty: bool

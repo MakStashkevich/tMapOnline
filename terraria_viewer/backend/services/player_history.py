@@ -10,17 +10,14 @@ from ..store_common import (
     StoreMixinContract,
     HISTORY_RETENTION_SECONDS,
     Path,
-    SPRITE_RENDERER_CACHE,
-    SPRITE_RENDERER_SOURCE,
     TERRARIA_CLIENT_IMAGES,
     is_valid_player_name,
     hashlib,
     json,
     re,
-    shutil,
-    subprocess,
     time,
 )
+from ...sprite_renderer import PlayerAppearance
 
 
 class PlayerHistoryMixin(StoreMixinContract):
@@ -157,9 +154,7 @@ class PlayerHistoryMixin(StoreMixinContract):
     def _write_player_sprite(self, player_id: str, name: str, appearance: Any) -> str:
         """Render a pixel avatar from Terraria's own XNB sprite sheets, without a graphics device."""
         appearance = appearance if isinstance(appearance, dict) else {}
-        java = shutil.which("java")
-        javac = shutil.which("javac")
-        if not java or not javac or not TERRARIA_CLIENT_IMAGES.is_dir():
+        if not TERRARIA_CLIENT_IMAGES.is_dir():
             return ""
 
         try:
@@ -188,9 +183,15 @@ class PlayerHistoryMixin(StoreMixinContract):
         except (TypeError, ValueError, OverflowError):
             return ""
 
-        def valid_color(key: str, fallback: str) -> str:
+        def valid_color(key: str, fallback: str) -> tuple[int, int, int]:
             value = str(appearance.get(key) or fallback)
-            return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value) else fallback
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+                value = fallback
+            return (
+                int(value[1:3], 16),
+                int(value[3:5], 16),
+                int(value[5:7], 16),
+            )
 
         hair_settings = appearance.get("hairSettings") if isinstance(appearance.get("hairSettings"), dict) else {}
         # Terraria's Wolf Mask is head slot 136. Its sprite is a full animal
@@ -209,73 +210,36 @@ class PlayerHistoryMixin(StoreMixinContract):
         if not mod_beard_texture or not Path(mod_beard_texture).is_file():
             mod_beard_texture = ""
 
-        def hair_flag(key: str, default: bool) -> str:
+        def hair_flag(key: str, default: bool) -> bool:
             value = hair_settings.get(key, default)
-            return "true" if value is True else "false" if value is False else ("true" if default else "false")
+            return value if isinstance(value, bool) else default
 
         digest = hashlib.sha256(player_id.encode("utf-8")).hexdigest()[:32]
         avatar_path = self._avatars_dir / f"{digest}.png"
-        class_name = "com.github.antag99.textract.extract.TerrariaPlayerSpriteRenderer"
-        source_files = [SPRITE_RENDERER_SOURCE / "LzxDecoder.java", SPRITE_RENDERER_SOURCE / "TerrariaPlayerSpriteRenderer.java"]
-        if not all(path.is_file() for path in source_files):
-            return ""
-
         try:
             with self._sprite_renderer_lock:
-                classes = SPRITE_RENDERER_CACHE / "classes"
-                class_file = classes / "com/github/antag99/textract/extract/TerrariaPlayerSpriteRenderer.class"
-                cache_stamp = max(path.stat().st_mtime_ns for path in source_files)
-                stamp_file = SPRITE_RENDERER_CACHE / "source-stamp"
-                try:
-                    compiled_stamp = int(stamp_file.read_text(encoding="ascii"))
-                except (OSError, ValueError):
-                    compiled_stamp = 0
-                if not class_file.is_file() or compiled_stamp != cache_stamp:
-                    classes.mkdir(mode=0o700, parents=True, exist_ok=True)
-                    compiled = subprocess.run(
-                        [javac, "-d", str(classes), *(str(path) for path in source_files)],
-                        capture_output=True,
-                        text=True,
-                        timeout=45,
-                        check=False,
-                    )
-                    if compiled.returncode != 0:
-                        return ""
-                    stamp_file.write_text(str(cache_stamp), encoding="ascii")
-                self._avatars_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                rendered = subprocess.run(
-                    [
-                        java,
-                        "-Djava.awt.headless=true",
-                        "-cp",
-                        str(classes),
-                        class_name,
-                        str(TERRARIA_CLIENT_IMAGES),
-                        str(avatar_path),
-                        str(skin_variant),
-                        str(hair),
-                        str(head),
-                        valid_color("hairColor", "#49372F"),
-                        valid_color("skinColor", "#E6B38A"),
-                        valid_color("eyeColor", "#547B9D"),
-                        hair_flag("fullHair", False) if not wolf_mask else "false",
-                        hair_flag("hatHair", False) if not wolf_mask else "false",
-                        hair_flag("hideHair", False) if not wolf_mask else "true",
-                        hair_flag("backHairDraw", True) if not wolf_mask else "false",
-                        hair_flag("backHairWithoutHeadgear", False),
-                        mod_head_texture,
-                        mod_face_texture,
-                        mod_beard_texture,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                    check=False,
+                self._player_sprite_renderer.render(
+                    TERRARIA_CLIENT_IMAGES,
+                    avatar_path,
+                    PlayerAppearance(
+                        skin_variant=skin_variant,
+                        hair_id=hair,
+                        head_id=head,
+                        hair_color=valid_color("hairColor", "#49372F"),
+                        skin_color=valid_color("skinColor", "#E6B38A"),
+                        eye_color=valid_color("eyeColor", "#547B9D"),
+                        full_hair=hair_flag("fullHair", False) if not wolf_mask else False,
+                        hat_hair=hair_flag("hatHair", False) if not wolf_mask else False,
+                        hide_hair=hair_flag("hideHair", False) if not wolf_mask else True,
+                        back_hair_draw=hair_flag("backHairDraw", True) if not wolf_mask else False,
+                        back_hair_without_headgear=hair_flag("backHairWithoutHeadgear", False),
+                        mod_head_texture=Path(mod_head_texture) if mod_head_texture else None,
+                        mod_face_texture=Path(mod_face_texture) if mod_face_texture else None,
+                        mod_beard_texture=Path(mod_beard_texture) if mod_beard_texture else None,
+                    ),
                 )
-                if rendered.returncode != 0 or not avatar_path.is_file():
-                    return ""
                 image_bytes = avatar_path.read_bytes()
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, ValueError, TypeError, IndexError):
             return ""
 
         version = hashlib.sha256(image_bytes).hexdigest()[:8]

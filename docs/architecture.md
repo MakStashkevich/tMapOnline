@@ -7,6 +7,7 @@ terraria-world-viewer/
 ├── terraria_viewer/
 │   ├── backend/       # HTTP API/static hosting и фасад существующей модели данных
 │   ├── telemetry/     # reconnectable JSONL client
+│   ├── sprite_renderer/ # Python XNB/LZX reader and cached image renderers
 │   ├── web/
 │   │   ├── src/       # TypeScript, SCSS и разделённые frontend modules
 │   │   ├── assets/    # собранные минифицированные JS/CSS, раздаваемые сервером
@@ -21,6 +22,10 @@ terraria-world-viewer/
 `backend/http.py` отвечает за API и границу HTTP. `backend/store.py` — стабильный фасад модели. Его доменные части находятся в `backend/services/`: `player_history`, `movement`, `live_telemetry`, `monitoring`, `world_map`. Общие файловые форматы и константы вынесены в `store_common.py`; mixin-срезы разделяют ответственность, но сохраняют один объект и единые locks/кэши. Входящие JSONL-снимки переводятся в dataclass-модели из `models/telemetry.py` для игроков, координат, NPC/боссов, монет и пилонов. Модели используются внутри доменной логики, а преобразуются в прежние словари только на границах хранения и HTTP. Это добавляет явные типы без изменения API и формата файлов.
 
 `telemetry/stream.py` принимает newline-delimited JSON snapshots. Мод собирает состояние сервера и отправляет его на localhost. Web не обращается к игровому процессу напрямую: он читает согласованный API.
+
+### Рендер спрайтов
+
+`sprite_renderer/xnb_texture.py` проверяет заголовки XNB и читает их `Texture2D` RGBA-данные. Сжатые XNB разворачиваются через `sprite_renderer/lzx.py`, включая 32-КБ кадры; внешний LZX-пакет и Java runtime не нужны. `PlayerSpriteRenderer`, `NpcSpriteRenderer` и `MapItemSpriteRenderer` отвечают за композицию аватаров, портретов NPC/боссов и иконок предметов. Pillow используется только как лёгкая граница чтения/записи PNG; кэширование и HTTP-адреса изображений остаются у `StatusStore`. Мод tModLoader остаётся на C#.
 
 ### tModLoader: композиция и сервисы
 
@@ -72,4 +77,4 @@ Frontend-команды: `npm ci` устанавливает закреплён�
 
 `config.yaml` — конфигурация запуска, включения страниц и разделов. Клиентская тема, выбранные игроки/слои и положение карты хранятся отдельно в localStorage. Персональные данные и кэши остаются в прежнем каталоге TerrariaTunnel, не в репозитории. Схему API и телеметрии см. в [telemetry.md](telemetry.md).
 
-Структура конфигов вдохновлена component/config layouts [Dynmap](https://dynmap.wiki.gg/wiki/Component_Configuration), [BlueMap](https://github.com/BlueMap-Minecraft/BlueMapWiki/blob/master/wiki/configs/Webapp.md) и [squaremap](https://github.com/jpenilla/squaremap/wiki/Default-config.yml); формат адаптирован к небольшому односерверному приложению.
+Конфигурация отделяет запуск сервиса от включения страниц и компонентов; пользовательские настройки отображения хранятся отдельно от серверных параметров.

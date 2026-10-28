@@ -7,10 +7,10 @@ name = "terraria-world-viewer"
 version = "0.1.0"
 description = "Modular local Terraria world viewer, telemetry service, and tModLoader server mod"
 requires-python = ">=3.9"
-dependencies = ["PyYAML>=6.0,<7"]
+dependencies = ["PyYAML>=6.0,<7", "Pillow>=10,<12"]
 
 [project.optional-dependencies]
-dev = ["types-PyYAML>=6.0"]
+dev = ["types-PyYAML>=6.0", "types-Pillow>=10,<12"]
 
 [project.scripts]
 terraria-viewer = "terraria_viewer.__main__:main"
@@ -20,7 +20,7 @@ where = ["."]
 include = ["terraria_viewer*"]
 
 [tool.setuptools.package-data]
-terraria_viewer = ["web/**/*.html", "web/**/*.css", "web/**/*.js", "web/**/*.ts", "web/**/*.scss", "sprite_renderer/java/*.java"]
+terraria_viewer = ["web/**/*.html", "web/**/*.css", "web/**/*.js", "web/**/*.ts", "web/**/*.scss", "sprite_renderer/LICENSE-lzx.txt"]
 
 [tool.pyright]
 include = ["terraria_viewer", "tests", "tools"]

@@ -1,10 +1,22 @@
-# Terraria player sprite renderer
+# Terraria sprite renderer
 
-This headless Java helper decodes the XNB `Texture2D` player, eye, hair, and armor-head sheets shipped with Terraria, then composites a transparent 40×56 PNG frame from the player's appearance metadata. It uses no GPU and does not launch Terraria. The Python monitor compiles it into `~/Library/Caches/TerrariaTunnel/player-sprite-renderer/` on first use and stores generated player PNGs in `~/Library/Application Support/TerrariaTunnel/player-avatars/`.
+The Viewer renders player portraits, NPC/boss heads, and map item icons in a
+pure-Python package. It reads the same local Terraria `.xnb` and mod-exported
+PNG textures as before, then writes cached PNGs under the Viewer data folder.
+The tModLoader mod remains C#; this package only replaces the separate Java
+image helper.
 
-The source sprite sheets remain in the user's local Terraria installation and are not copied into this repository. The renderer accepts mod texture PNGs exported by the telemetry mod and applies compatible head, face, and beard layers to the portrait. It keeps the vanilla portrait if an accessory uses a different sprite frame size. Body, legs, and other visible accessory textures are exported and included in appearance metadata, but the current portrait remains head-only.
+`XnbTextureReader` validates the XNB header, asset reader table, dimensions,
+pixel format, and byte count before returning RGBA pixels. For compressed XNB
+assets it strips the 32 KiB frame headers and decodes the LZX stream in
+Python. Player layers are composited in their existing order, NPC textures are
+cropped to a head portrait and receive the pixel outline, and map item textures
+are trimmed to visible pixels.
 
-`LzxDecoder.java` is derived from TExtract's Java LZX decoder and retains its source license header. It is dual-licensed under LGPL-2.1 and MS-PL; copies of both license texts are in `java/licenses/`.
+Pillow is the only added runtime dependency. It reads mod-exported PNGs and
+writes the cached output; LZX decoding and the source-over pixel compositor
+are Python code. Java and `javac` are no longer needed to start the Viewer or
+generate these sprites.
 
-- TExtract: https://github.com/Antag99/TExtract
-- Terraria's decompiled `PlayerDrawLayers` and `LegacyPlayerRenderer` informed the layer ordering and 40×56 frame layout.
+The LZX decoder is distributed under the MIT license. Its required license
+notice is included as `LICENSE-lzx.txt`.

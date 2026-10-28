@@ -9,6 +9,7 @@ from .services.movement import MovementMixin
 from .services.live_telemetry import LiveTelemetryMixin
 from .services.monitoring import MonitoringMixin
 from .services.world_map import WorldMapMixin
+from ..sprite_renderer import MapItemSpriteRenderer, NpcSpriteRenderer, PlayerSpriteRenderer
 
 
 class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, MonitoringMixin, WorldMapMixin):
@@ -50,6 +51,9 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self.map_sprite_directory = map_sprites_dir
         self._coin_sprite_cache: dict[int, str | None] = {}
         self._sprite_renderer_lock = threading.Lock()
+        self._player_sprite_renderer = PlayerSpriteRenderer()
+        self._npc_sprite_renderer = NpcSpriteRenderer()
+        self._map_item_sprite_renderer = MapItemSpriteRenderer()
         self._movements_dir = movements_dir
         self._exploration_dir = exploration_dir
         self._world_map_cache_file = movements_dir / "world-map-cache.json"
