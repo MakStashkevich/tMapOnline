@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from ...models import LiveTelemetrySnapshot, NpcEntity
+
 from ..store_common import (
     Any,
     SPRITE_RENDERER_CACHE,
     SPRITE_RENDERER_SOURCE,
     TERRARIA_CLIENT_IMAGES,
-    StoreMixinContract,
-    as_json_array,
     cast,
-    as_json_object,
+    StoreMixinContract,
     is_valid_player_name,
     is_valid_png,
     hashlib,
@@ -40,98 +40,31 @@ class LiveTelemetryMixin(StoreMixinContract):
 
     def set_live_telemetry(self, snapshot: dict[str, Any]) -> None:
         """Apply one trusted-local tModLoader telemetry snapshot to monitor storage."""
-        server = as_json_object(snapshot.get("server"))
-        world = as_json_object(snapshot.get("world"))
-        raw_npcs = as_json_array(world.get("activeNpcs"))
-        active_npcs: list[dict[str, Any]] = []
-        for npc_value in raw_npcs:
-            npc = as_json_object(npc_value)
-            try:
-                x, y = int(cast(Any, npc.get("x"))), int(cast(Any, npc.get("y")))
-                npc_type = int(cast(Any, npc.get("type")))
-                frame_width = max(1, min(1024, int(npc.get("frameWidth", 32))))
-                frame_height = max(1, min(1024, int(npc.get("frameHeight", 32))))
-                head_slot = int(npc.get("headSlot", -1))
-                boss_head_slot = int(npc.get("bossHeadSlot", -1))
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if x < 0 or y < 0 or npc_type < 1:
-                continue
-            npc_name = str(npc.get("name") or "NPC").strip()[:100]
-            texture_hash = str(npc.get("modTexture") or "")
-            head_texture_hash = str(npc.get("headTexture") or "")
+        telemetry = LiveTelemetrySnapshot.from_payload(snapshot)
+        server = telemetry.server
+        world = telemetry.world
+        active_npcs: list[NpcEntity] = []
+        for npc in telemetry.npcs:
+            texture_hash = npc.mod_texture
             icon_url = self._write_npc_sprite(
-                npc_type, texture_hash, frame_width, frame_height,
-                head_slot, boss_head_slot, head_texture_hash,
+                npc.npc_type, texture_hash, npc.frame_width, npc.frame_height,
+                npc.head_slot, npc.boss_head_slot, npc.head_texture,
             )
-            active_npcs.append({
-                "id": str(npc.get("id", ""))[:32],
-                "type": npc_type,
-                "name": npc_name,
-                "boss": npc.get("boss") is True,
-                "x": x,
-                "y": y,
-                "icon_url": icon_url,
-            })
-        coin_names = {71: "Медная монета", 72: "Серебряная монета", 73: "Золотая монета", 74: "Платиновая монета"}
-        raw_coins = as_json_array(world.get("droppedCoins"))
-        active_coins: list[dict[str, Any]] = []
-        for coin_value in raw_coins:
-            coin = as_json_object(coin_value)
-            try:
-                item_type, x, y, stack = int(cast(Any, coin.get("type"))), int(cast(Any, coin.get("x"))), int(cast(Any, coin.get("y"))), int(cast(Any, coin.get("stack")))
-            except (TypeError, ValueError, OverflowError):
-                continue
-            if item_type not in coin_names or x < 0 or y < 0 or stack < 1:
-                continue
-            icon_url = self._write_map_coin_sprite(item_type)
-            active_coins.append({
-                "id": str(coin.get("id", ""))[:32],
-                "type": item_type,
-                "name": str(coin.get("name") or coin_names[item_type]).strip()[:100],
-                "x": x,
-                "y": y,
-                "stack": stack,
-                "icon_url": icon_url,
-            })
+            active_npcs.append(npc.with_icon(icon_url))
+        active_coins = [
+            coin.with_icon(self._write_map_coin_sprite(coin.item_type))
+            for coin in telemetry.coins
+        ]
         world_id = world.get("id", world.get("world_id"))
         with self._lock:
             self._active_npcs = active_npcs
             self._active_npcs_world_id = str(world_id) if world_id is not None else None
             self._active_coins = active_coins
             self._active_coins_world_id = str(world_id) if world_id is not None else None
-        mode = as_json_object(world.get("gameMode"))
-        players = as_json_object(snapshot.get("players"))
-        player_list = as_json_array(players.get("list"))
-        normalized_players: list[dict[str, Any]] = []
-        for player_value in player_list:
-            player = as_json_object(player_value)
-            if not player or not is_valid_player_name(player.get("name")):
-                continue
-            normalized_players.append({
-                "name": str(player.get("name", "")),
-                "uuid": player.get("uuid"),
-                "joined_at": player.get("joinedAtUnix"),
-                "session_seconds": player.get("sessionSeconds"),
-                "position": player.get("position"),
-                "teleported": player.get("teleported") is True,
-                "mapCapture": player.get("mapCapture"),
-                "appearance": player.get("appearance"),
-            })
-        self.set_players_online(len(normalized_players), normalized_players, world=world)
-        raw_pylons = as_json_array(snapshot.get("pylons"))
-        if raw_pylons:
-            pylons: list[dict[str, Any]] = []
-            for pylon_value in raw_pylons:
-                pylon = as_json_object(pylon_value)
-                try:
-                    x, y = int(cast(Any, pylon.get("x"))), int(cast(Any, pylon.get("y")))
-                except (TypeError, ValueError):
-                    continue
-                pylon_type = str(pylon.get("type") or "").strip()
-                if x < 0 or y < 0 or not pylon_type:
-                    continue
-                pylons.append({"x": x, "y": y, "type": pylon_type})
+        players = [player for player in telemetry.players if is_valid_player_name(player.name)]
+        self.set_players_online(len(players), players, world=world)
+        pylons = [pylon.to_payload() for pylon in telemetry.pylons]
+        if telemetry.has_pylon_snapshot:
             with self._lock:
                 cache_key = self._world_map_cache_key(world)
                 world_cache = self._world_map_cache.setdefault(cache_key, {
@@ -158,7 +91,7 @@ class LiveTelemetryMixin(StoreMixinContract):
                     world_cache["pylons"] = pylons
                     self._world_map_cache_dirty = True
                 self._save_world_map_cache_if_due()
-        base_captures = as_json_array(snapshot.get("baseMapCaptures"))
+        base_captures = telemetry.base_map_captures
         if base_captures:
             with self._lock:
                 cache_key = self._world_map_cache_key(world)
@@ -194,13 +127,9 @@ class LiveTelemetryMixin(StoreMixinContract):
             world_id=world.get("id"),
             world_width=world.get("width"),
             world_height=world.get("height"),
-            map_scan=(
-                as_json_object(snapshot.get("mapScan"))
-                if isinstance(snapshot.get("mapScan"), dict)
-                else None
-            ),
-            game_mode=mode.get("name"),
-            game_mode_id=mode.get("id"),
+            map_scan=telemetry.map_scan,
+            game_mode=telemetry.game_mode.get("name") if telemetry.game_mode else None,
+            game_mode_id=telemetry.game_mode.get("id") if telemetry.game_mode else None,
             hardmode=world.get("hardmode"),
             crimson=world.get("crimson"),
             day=world.get("day"),
@@ -214,7 +143,7 @@ class LiveTelemetryMixin(StoreMixinContract):
             defeated_bosses=world.get("defeatedBosses"),
             boss_defeat_counts=world.get("bossDefeatCounts"),
             boss_status=world.get("bossStatus"),
-            telemetry_updated_at=snapshot.get("generatedAtUnix"),
+            telemetry_updated_at=telemetry.generated_at,
         )
         with self._lock:
             self._telemetry_received_at = time.time()

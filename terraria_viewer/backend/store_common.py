@@ -19,6 +19,8 @@ import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Protocol, cast
+
+from ..models import DroppedCoin, NpcEntity
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -118,9 +120,9 @@ class StoreMixinContract(Protocol):
     _player_names: list[str] | None
     _players_checked_at: float | None
     _telemetry_received_at: float | None
-    _active_npcs: list[dict[str, Any]]
+    _active_npcs: list[NpcEntity]
     _active_npcs_world_id: str | None
-    _active_coins: list[dict[str, Any]]
+    _active_coins: list[DroppedCoin]
     _active_coins_world_id: str | None
     _updated_at: float
 

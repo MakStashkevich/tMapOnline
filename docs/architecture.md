@@ -18,7 +18,7 @@ terraria-world-viewer/
 └── docs/
 ```
 
-`backend/http.py` отвечает за API и границу HTTP. `backend/store.py` — стабильный фасад модели. Его доменные части находятся в `backend/services/`: `player_history`, `movement`, `live_telemetry`, `monitoring`, `world_map`. Общие файловые форматы и константы вынесены в `store_common.py`; mixin-срезы разделяют ответственность, но сохраняют один объект и единые locks/кэши. Это позволяет делить реализацию, не меняя API и существующий формат файлов.
+`backend/http.py` отвечает за API и границу HTTP. `backend/store.py` — стабильный фасад модели. Его доменные части находятся в `backend/services/`: `player_history`, `movement`, `live_telemetry`, `monitoring`, `world_map`. Общие файловые форматы и константы вынесены в `store_common.py`; mixin-срезы разделяют ответственность, но сохраняют один объект и единые locks/кэши. Входящие JSONL-снимки переводятся в dataclass-модели из `models/telemetry.py` для игроков, координат, NPC/боссов, монет и пилонов. Модели используются внутри доменной логики, а преобразуются в прежние словари только на границах хранения и HTTP. Это добавляет явные типы без изменения API и формата файлов.
 
 `telemetry/stream.py` принимает newline-delimited JSON snapshots. Мод собирает состояние сервера и отправляет его на localhost. Web не обращается к игровому процессу напрямую: он читает согласованный API.
 

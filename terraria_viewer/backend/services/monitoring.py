@@ -2,6 +2,8 @@
 # pyright: reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 from __future__ import annotations
 
+from ...models import PlayerSnapshot
+
 from ..store_common import (
     Any,
     StoreMixinContract,
@@ -17,16 +19,16 @@ from ..store_common import (
 
 class MonitoringMixin(StoreMixinContract):
     def set_players_online(
-        self, count: int, players: list[dict[str, Any]] | None = None, *, world: dict[str, Any] | None = None
+        self, count: int, players: list[PlayerSnapshot] | None = None, *, world: dict[str, Any] | None = None
     ) -> None:
         now = time.time()
         with self._lock:
             valid_players = [
                 player for player in players or []
-                if is_valid_player_name(player.get("name"))
+                if is_valid_player_name(player.name)
             ] if players is not None else None
             self._players_online = len(valid_players) if valid_players is not None else max(0, count)
-            self._player_names = [str(player.get("name", "")).strip() for player in valid_players] if valid_players is not None else None
+            self._player_names = [player.name.strip() for player in valid_players] if valid_players is not None else None
             self._players_checked_at = now
             self._players_updated_at = now
             if valid_players is not None:
@@ -37,8 +39,8 @@ class MonitoringMixin(StoreMixinContract):
                         self._players.pop(player_id, None)
                 seen_ids: set[str] = set()
                 for player in valid_players:
-                    name = str(player.get("name", "")).strip()[:64]
-                    uuid = str(player.get("uuid") or "").strip() or None
+                    name = player.name.strip()[:64]
+                    uuid = str(player.uuid or "").strip() or None
                     name_key = f"name:{name.casefold()}"
                     player_id = f"uuid:{uuid.casefold()}" if uuid else name_key
                     if uuid and name_key in self._players:
@@ -73,7 +75,7 @@ class MonitoringMixin(StoreMixinContract):
                     record["name"] = name
                     if uuid:
                         record["uuid"] = uuid
-                    appearance = player.get("appearance")
+                    appearance = player.appearance
                     if isinstance(appearance, dict) and (
                         appearance != record.get("appearance")
                         or record.get("avatar_render_signature") != self._appearance_signature(appearance)
@@ -89,24 +91,24 @@ class MonitoringMixin(StoreMixinContract):
                             player_id, name, record.get("appearance", {})
                         )
                         record["avatar_render_signature"] = self._appearance_signature(record.get("appearance", {}))
-                    position = self._position_from_player(player)
+                    position = (player.position.tile_x, player.position.tile_y) if player.position is not None else None
                     if position is not None:
                         tile_x, tile_y = position
                         record["position"] = {"tileX": tile_x, "tileY": tile_y, "updated_at": now}
                         self._record_player_movement(
-                            player_id, name, uuid, position, world or {}, now, player.get("mapCapture"),
-                            bool(player.get("teleported")),
+                            player_id, name, uuid, position, world or {}, now, player.map_capture,
+                            player.teleported,
                         )
                     record["last_seen_at"] = now
                     sessions = record.setdefault("sessions", [])
                     active = sessions[-1] if sessions and sessions[-1].get("ended_at") is None else None
                     if active is None:
                         try:
-                            joined_at = float(player.get("joined_at") or now)
+                            joined_at = float(player.joined_at or now)
                         except (TypeError, ValueError):
                             joined_at = now
                         try:
-                            session_seconds = max(0, float(player.get("session_seconds") or 0))
+                            session_seconds = max(0, float(player.session_seconds or 0))
                         except (TypeError, ValueError):
                             session_seconds = 0
                         sessions.append({

@@ -86,11 +86,11 @@ class WorldMapMixin(StoreMixinContract):
             active_npcs = []
             if telemetry_age is not None and telemetry_age <= 5 and self._active_npcs_world_id in {str(active_id), active_name}:
                 if not requested or requested in {self._active_npcs_world_id, active_name}:
-                    active_npcs = [dict(item) for item in self._active_npcs]
+                    active_npcs = [item.to_payload() for item in self._active_npcs]
             active_coins = []
             if telemetry_age is not None and telemetry_age <= 5 and self._active_coins_world_id in {str(active_id), active_name}:
                 if not requested or requested in {self._active_coins_world_id, active_name}:
-                    active_coins = [dict(item) for item in self._active_coins]
+                    active_coins = [item.to_payload() for item in self._active_coins]
             selected_world: dict[str, Any] | None = None
             base_chunks_raw: dict[str, Any] = {}
             base_chunk_times: dict[str, Any] = {}

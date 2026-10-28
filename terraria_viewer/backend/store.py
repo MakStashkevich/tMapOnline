@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .store_common import *
+from ..models import DroppedCoin, NpcEntity
 from .services.player_history import PlayerHistoryMixin
 from .services.movement import MovementMixin
 from .services.live_telemetry import LiveTelemetryMixin
@@ -90,9 +91,9 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._player_names: list[str] | None = None
         self._players_checked_at: float | None = None
         self._telemetry_received_at: float | None = None
-        self._active_npcs: list[dict[str, Any]] = []
+        self._active_npcs: list[NpcEntity] = []
         self._active_npcs_world_id: str | None = None
-        self._active_coins: list[dict[str, Any]] = []
+        self._active_coins: list[DroppedCoin] = []
         self._active_coins_world_id: str | None = None
         self._updated_at = time.time()
         self._load_world_map_cache()
