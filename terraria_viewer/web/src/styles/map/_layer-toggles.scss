@@ -67,15 +67,16 @@
 }
 .player-toggle-avatar {
   display: grid;
-  flex: 0 0 25px;
-  width: 25px;
-  height: 34px;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
   place-items: center;
 }
 .player-toggle-avatar-sprite {
   display: block;
   width: auto;
-  height: 32px;
-  max-width: 25px;
+  height: auto;
+  max-width: none;
+  max-height: none;
   image-rendering: pixelated;
 }
