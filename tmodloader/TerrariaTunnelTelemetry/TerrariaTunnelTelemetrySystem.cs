@@ -208,6 +208,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 id = Main.worldID,
                 width = Main.maxTilesX,
                 height = Main.maxTilesY,
+                surface = Main.worldSurface,
                 language = Language.ActiveCulture.Name,
                 spawnX = Main.spawnTileX,
                 spawnY = Main.spawnTileY,

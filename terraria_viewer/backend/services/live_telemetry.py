@@ -68,6 +68,7 @@ class LiveTelemetryMixin(StoreMixinContract):
                     "world_name": world.get("name") or world.get("world_name"),
                     "width": world.get("width"),
                     "height": world.get("height"),
+                    "surface_y": world.get("surface"),
                     "spawn_x": world.get("spawnX"),
                     "spawn_y": world.get("spawnY"),
                     "base_map_chunks": {},
@@ -83,6 +84,10 @@ class LiveTelemetryMixin(StoreMixinContract):
                         world_cache["spawn_x"] = spawn_x
                         world_cache["spawn_y"] = spawn_y
                         self._world_map_cache_dirty = True
+                surface_y = world.get("surface")
+                if surface_y is not None and world_cache.get("surface_y") != surface_y:
+                    world_cache["surface_y"] = surface_y
+                    self._world_map_cache_dirty = True
                 if world_cache.get("pylons") != pylons:
                     world_cache["pylons"] = pylons
                     self._world_map_cache_dirty = True
@@ -96,6 +101,7 @@ class LiveTelemetryMixin(StoreMixinContract):
                     "world_name": world.get("name") or world.get("world_name"),
                     "width": world.get("width"),
                     "height": world.get("height"),
+                    "surface_y": world.get("surface"),
                     "base_map_chunks": {},
                     "base_map_chunk_times": {},
                 })
@@ -104,6 +110,7 @@ class LiveTelemetryMixin(StoreMixinContract):
                     "world_name": world.get("name") or world.get("world_name"),
                     "width": world.get("width"),
                     "height": world.get("height"),
+                    "surface_y": world.get("surface"),
                 })
                 changed = False
                 for item in base_captures:
@@ -123,6 +130,7 @@ class LiveTelemetryMixin(StoreMixinContract):
             world_id=world.get("id"),
             world_width=world.get("width"),
             world_height=world.get("height"),
+            world_surface=world.get("surface"),
             map_scan=telemetry.map_scan,
             game_mode=telemetry.game_mode.get("name") if telemetry.game_mode else None,
             game_mode_id=telemetry.game_mode.get("id") if telemetry.game_mode else None,

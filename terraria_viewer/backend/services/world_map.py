@@ -207,6 +207,7 @@ class WorldMapMixin(StoreMixinContract):
                     "name": selected_world.get("world_name", active_name),
                     "width": selected_world.get("width", self._server_info.get("world_width")),
                     "height": selected_world.get("height", self._server_info.get("world_height")),
+                    "surface_y": selected_world.get("surface_y", self._server_info.get("world_surface")),
                     "spawn_x": selected_world.get("spawn_x"),
                     "spawn_y": selected_world.get("spawn_y"),
                 },

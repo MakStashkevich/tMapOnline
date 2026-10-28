@@ -550,12 +550,16 @@ const modules = await activateModules('world_map');
           if (bitmap) explorationImages.set(player.id, bitmap);
         }),
     );
-    const nextMaskPlayersKey = JSON.stringify(
+    // Older telemetry lacks Main.worldSurface; the world spawn is a safe temporary boundary.
+    const worldSurface = data.world?.surface_y ?? data.world?.spawn_y;
+    const surfaceY = Number.isFinite(Number(worldSurface)) ? Number(worldSurface) : null;
+    const nextMaskPlayersKey = JSON.stringify([
+      surfaceY,
       explored.map((player) => [player.id, player.pathKey, player.exploration_url]),
-    );
+    ]);
     const rebuildMask = nextMaskPlayersKey !== maskPlayersKey;
     if (rebuildMask && explorationMask) {
-      exploredPercent = explorationMask.rebuild(explored, explorationImages);
+      exploredPercent = explorationMask.rebuild(explored, explorationImages, surfaceY);
       maskPlayersKey = nextMaskPlayersKey;
     }
     if (rebuildMask) maskVersion++;
