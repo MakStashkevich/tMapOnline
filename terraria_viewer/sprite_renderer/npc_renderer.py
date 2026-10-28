@@ -1,29 +1,19 @@
-"""Extract compact NPC portraits and add the map's pixel outline."""
+"""Extract native-size NPC head portraits for the map."""
 
 from __future__ import annotations
 
-from collections import deque
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol, cast
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image
 
 from .xnb_texture import XnbTextureReader
-
-
-class _LookupImage(Protocol):
-    """The Pillow operation used to remap grayscale mask values."""
-
-    def point(self, lookup: Sequence[int], mode: str | None = None) -> Image.Image: ...
 
 
 class NpcSpriteRenderer:
     """Render either a registered NPC head icon or a crop from its body sheet."""
 
-    def __init__(self, texture_reader: XnbTextureReader | None = None, outline_radius: int = 1) -> None:
+    def __init__(self, texture_reader: XnbTextureReader | None = None) -> None:
         self._texture_reader = texture_reader or XnbTextureReader()
-        self._outline_radius = max(0, outline_radius)
 
     def render(
         self,
@@ -54,14 +44,16 @@ class NpcSpriteRenderer:
             portrait_size = min(portrait_size, height)
             crop_left = max(0, (width - portrait_size) // 2)
             portrait = frame.crop((crop_left, 0, crop_left + portrait_size, portrait_size))
-        alpha_bounds = portrait.getchannel("A").getbbox()
-        if alpha_bounds is None:
-            raise ValueError("NPC sprite frame is transparent")
+        if not head_texture:
+            alpha_bounds = portrait.getchannel("A").getbbox()
+            if alpha_bounds is None:
+                raise ValueError("NPC sprite frame is transparent")
+            portrait = portrait.crop(alpha_bounds)
 
-        portrait = portrait.crop(alpha_bounds)
-        outlined = self._add_pixel_outline(portrait)
         output_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        outlined.save(output_path, format="PNG")
+        # Keep the game texture untouched. The browser applies Terraria's two
+        # outline passes at the current map scale, just like its map renderer.
+        portrait.save(output_path, format="PNG")
 
     @staticmethod
     def _first_visible_frame(sheet: Image.Image, width: int, height: int) -> Image.Image | None:
@@ -71,65 +63,3 @@ class NpcSpriteRenderer:
                 if frame.getchannel("A").getbbox() is not None:
                     return frame
         return None
-
-    def _add_pixel_outline(self, sprite: Image.Image) -> Image.Image:
-        radius = self._outline_radius
-        if radius == 0:
-            return sprite
-
-        # Outline the visible sprite silhouette, rather than its rectangular canvas.
-        source_alpha = sprite.getchannel("A")
-        solid_shape = cast(_LookupImage, source_alpha).point(
-            [255 if value else 0 for value in range(256)]
-        )
-        solid_shape = self._fill_enclosed_transparency(solid_shape)
-
-        output_size = (sprite.width + radius * 2, sprite.height + radius * 2)
-        expanded_shape = Image.new("L", output_size, 0)
-        expanded_shape.paste(solid_shape, (radius, radius))
-        expanded_shape = expanded_shape.filter(ImageFilter.MaxFilter(radius * 2 + 1))
-
-        original_shape = Image.new("L", output_size, 0)
-        original_shape.paste(solid_shape, (radius, radius))
-        outline_alpha = ImageChops.subtract(expanded_shape, original_shape)
-
-        result = Image.new("RGBA", output_size, (255, 255, 255, 0))
-        result.putalpha(outline_alpha)
-        result.alpha_composite(sprite, (radius, radius))
-        return result
-
-    @staticmethod
-    def _fill_enclosed_transparency(mask: Image.Image) -> Image.Image:
-        """Mark enclosed transparent pixels as part of the silhouette."""
-        pixels = mask.load()
-        width, height = mask.size
-        exterior = 128
-
-        # Flood-fill every transparent region connected to the canvas edge. Any
-        # transparent pixels left afterward are holes inside the face silhouette.
-        edge_points: list[tuple[int, int]] = (
-            [(x, 0) for x in range(width)]
-            + [(x, height - 1) for x in range(width)]
-            + [(0, y) for y in range(height)]
-            + [(width - 1, y) for y in range(height)]
-        )
-        frontier: deque[tuple[int, int]] = deque()
-        for point in edge_points:
-            if pixels[point] == 0:
-                pixels[point] = exterior
-                frontier.append(point)
-
-        while frontier:
-            x, y = frontier.popleft()
-            for neighbor in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
-                neighbor_x, neighbor_y = neighbor
-                if not (0 <= neighbor_x < width and 0 <= neighbor_y < height):
-                    continue
-                if pixels[neighbor] == 0:
-                    pixels[neighbor] = exterior
-                    frontier.append(neighbor)
-
-        enclosed_transparency_lut = [
-            0 if value == exterior else 255 for value in range(256)
-        ]
-        return cast(_LookupImage, mask).point(enclosed_transparency_lut)

@@ -116,7 +116,7 @@ class TerrariaSpriteRendererTests(unittest.TestCase):
                 self.assertEqual((1, 2), image.size)
                 self.assertEqual((14, 28, 42, 255), get_rgba_pixel(image, (0, 0)))
 
-    def test_npc_head_gets_pixel_outline_without_a_name_card(self) -> None:
+    def test_npc_head_keeps_native_pixels_without_a_name_card(self) -> None:
         pixels = bytes((200, 100, 50, 255))
         xnb = make_compressed_xnb(make_xnb_texture_payload(pixels, width=1, height=1))
 
@@ -125,11 +125,10 @@ class TerrariaSpriteRendererTests(unittest.TestCase):
             source = root / "head.xnb"
             output = root / "head.png"
             source.write_bytes(xnb)
-            NpcSpriteRenderer(outline_radius=2).render(source, output, 32, 32, True)
+            NpcSpriteRenderer().render(source, output, 32, 32, True)
             with Image.open(output) as image:
-                self.assertEqual((5, 5), image.size)
-                self.assertEqual((200, 100, 50, 255), get_rgba_pixel(image, (2, 2)))
-                self.assertEqual((255, 255, 255, 255), get_rgba_pixel(image, (0, 0)))
+                self.assertEqual((1, 1), image.size)
+                self.assertEqual((200, 100, 50, 255), get_rgba_pixel(image, (0, 0)))
 
 
 if __name__ == "__main__":

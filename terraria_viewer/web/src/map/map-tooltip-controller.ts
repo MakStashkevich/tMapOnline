@@ -1,7 +1,14 @@
 import { MapEntityLayer } from './map-entity-layer';
 
-type TooltipObject = { key: string; title: string; description: string };
+type TooltipObject = {
+  key: string;
+  title: string;
+  description: string;
+  playerId?: string;
+  sessionSeconds?: number | null;
+};
 type TooltipMapData = any;
+type PlayerSessionCache = { fetchedAt: number; secondsByPlayerId: Map<string, number> };
 
 type MapTooltipBindings = {
   stage: HTMLElement;
@@ -17,6 +24,8 @@ type MapTooltipBindings = {
 /** Delays hover lookups and owns the tooltip cache and its visible state. */
 export class MapTooltipController {
   private readonly tileInfoCache = new Map<string, any>();
+  private playerSessionCache: PlayerSessionCache | null = null;
+  private playerSessionRequest: Promise<Map<string, number> | null> | null = null;
   private hoverTimer: ReturnType<typeof setTimeout> | null = null;
   private hoverKey = '';
   private hoverToken = 0;
@@ -71,6 +80,15 @@ export class MapTooltipController {
   ): Promise<void> {
     if (token !== this.hoverToken) return;
     if (object) {
+      if (object.playerId) {
+        const sessionSeconds =
+          object.sessionSeconds ?? (await this.getPlayerSessionSeconds(object.playerId));
+        if (token !== this.hoverToken) return;
+        const gameTime =
+          sessionSeconds === null ? 'время не получено' : this.formatGameTime(sessionSeconds);
+        this.show(cursor, object.title, `Играет ${gameTime} · ${object.description}`);
+        return;
+      }
       this.show(cursor, object.title, object.description);
       return;
     }
@@ -176,11 +194,19 @@ export class MapTooltipController {
     for (const player of data.players || []) {
       if (player.online !== true) continue;
       const point = this.bindings.getPlayerPoint(player);
-      if (point && isNear(point.x, point.y, 34)) {
+      if (point && isNear(point.x, point.y, 20)) {
+        const rawSessionSeconds = Number(player.session_seconds);
         return {
           key: `player:${player.id}`,
           title: player.name || 'Игрок',
-          description: `Игрок в мире · плитка ${Math.floor(point.x)}, ${Math.floor(point.y)}`,
+          description: `Плитка ${Math.floor(point.x)}, ${Math.floor(point.y)}`,
+          playerId: String(player.id),
+          sessionSeconds:
+            player.session_seconds !== null &&
+            player.session_seconds !== undefined &&
+            Number.isFinite(rawSessionSeconds)
+              ? rawSessionSeconds
+              : null,
         };
       }
     }
@@ -200,6 +226,48 @@ export class MapTooltipController {
     }
 
     return null;
+  }
+
+  private formatGameTime(seconds: number): string {
+    const totalMinutes = Math.floor(Math.max(0, seconds) / 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours > 0 ? `${hours} ч ${minutes} мин` : `${minutes} мин`;
+  }
+
+  private async getPlayerSessionSeconds(playerId: string): Promise<number | null> {
+    const cacheIsFresh =
+      this.playerSessionCache !== null && Date.now() - this.playerSessionCache.fetchedAt < 10_000;
+    if (!cacheIsFresh) {
+      this.playerSessionRequest ??= this.loadPlayerSessions().finally(() => {
+        this.playerSessionRequest = null;
+      });
+      const secondsByPlayerId = await this.playerSessionRequest;
+      if (secondsByPlayerId) {
+        this.playerSessionCache = { fetchedAt: Date.now(), secondsByPlayerId };
+      }
+    }
+    return this.playerSessionCache?.secondsByPlayerId.get(playerId) ?? null;
+  }
+
+  private async loadPlayerSessions(): Promise<Map<string, number> | null> {
+    try {
+      // The map endpoint stays compact; fetch session history only when a player tooltip is opened.
+      const response = await fetch('/api/section-data?section=players', { cache: 'no-store' });
+      if (!response.ok) return null;
+      const data = await response.json();
+      const secondsByPlayerId = new Map<string, number>();
+      for (const player of data.players || []) {
+        const sessions = Array.isArray(player.sessions) ? player.sessions : [];
+        const activeSession = sessions.at(-1);
+        if (!activeSession || activeSession.ended_at !== null) continue;
+        const seconds = Number(activeSession.duration_seconds);
+        if (Number.isFinite(seconds)) secondsByPlayerId.set(String(player.id), seconds);
+      }
+      return secondsByPlayerId;
+    } catch {
+      return null;
+    }
   }
 
   private show(

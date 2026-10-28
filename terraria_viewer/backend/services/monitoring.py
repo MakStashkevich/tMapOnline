@@ -79,6 +79,12 @@ class MonitoringMixin(StoreMixinContract):
                         record.pop("team", None)
                     else:
                         record["team"] = player.team
+                    if player.direction is None:
+                        record.pop("direction", None)
+                    else:
+                        record["direction"] = player.direction
+                    if player.session_seconds is not None:
+                        record["online_session_seconds"] = max(0, player.session_seconds)
                     appearance = player.appearance
                     if isinstance(appearance, dict) and (
                         appearance != record.get("appearance")

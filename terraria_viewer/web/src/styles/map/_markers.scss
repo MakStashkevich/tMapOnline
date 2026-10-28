@@ -55,6 +55,14 @@
   box-shadow: 0 2px 12px #0009;
   white-space: nowrap;
 }
+.player-marker {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: max-content;
+  height: max-content;
+  transform: translate(-50%, -50%) scale(var(--map-icon-scale, 1));
+}
 .marker img,
 .marker .avatar-fallback {
   width: 30px;
@@ -64,15 +72,18 @@
   image-rendering: pixelated;
   background: #263544;
 }
-.marker img.player-head-sprite {
-  width: 30px;
-  height: 34px;
+.player-marker .player-head-sprite {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
   border-radius: 0;
-  object-fit: contain;
   background: transparent;
-  filter: drop-shadow(1px 0 var(--player-team-color)) drop-shadow(-1px 0 var(--player-team-color))
-    drop-shadow(0 1px var(--player-team-color)) drop-shadow(0 -1px var(--player-team-color))
-    drop-shadow(0 1px 2px #000);
+  image-rendering: pixelated;
+}
+.player-marker .player-head-sprite.facing-left {
+  transform: scaleX(-1);
 }
 .marker-name {
   max-width: 170px;

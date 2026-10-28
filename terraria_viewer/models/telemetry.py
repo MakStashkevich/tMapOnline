@@ -67,6 +67,7 @@ class PlayerSnapshot:
     map_capture: dict[str, Any] | None
     appearance: dict[str, Any] | None
     team: int | None
+    direction: int | None
 
     @classmethod
     def from_payload(cls, value: Any) -> PlayerSnapshot | None:
@@ -89,6 +90,11 @@ class PlayerSnapshot:
                 if (team := _integer(raw.get("team"))) is not None and 0 <= team <= 5
                 else None
             ),
+            direction=(
+                direction
+                if (direction := _integer(raw.get("direction"))) in (-1, 1)
+                else None
+            ),
         )
 
     def to_store_payload(self) -> dict[str, Any]:
@@ -103,6 +109,7 @@ class PlayerSnapshot:
             "mapCapture": self.map_capture,
             "appearance": self.appearance,
             "team": self.team,
+            "direction": self.direction,
         }
 
 

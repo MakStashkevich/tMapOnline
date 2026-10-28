@@ -250,6 +250,7 @@ const modules = await activateModules('world_map');
       height = Math.max(1, Math.round(data.world.height * scale));
     $('stage').style.width = `${width}px`;
     $('stage').style.height = `${height}px`;
+    mapEntityLayer.setMapScale(scale);
     const paths = $('paths');
     paths.setAttribute('viewBox', `0 0 ${data.world.width} ${data.world.height}`);
     paths.style.width = `${width}px`;
@@ -575,6 +576,8 @@ const modules = await activateModules('world_map');
         player.avatar_url,
         player.online,
         player.team,
+        player.direction,
+        player.session_seconds,
         player.position?.tileX,
         player.position?.tileY,
         player.position?.x,

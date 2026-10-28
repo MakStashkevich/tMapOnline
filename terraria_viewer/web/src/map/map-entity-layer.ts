@@ -20,6 +20,8 @@ type MapPlayerMarker = {
   name?: string;
   avatar_url?: string;
   team?: number | null;
+  direction?: number | null;
+  session_seconds?: number | null;
   position?: { tileX?: number; tileY?: number; x?: number; y?: number };
   positions?: Array<{ x: number; y: number; tileX?: number; tileY?: number }>;
 };
@@ -46,11 +48,18 @@ type MapPylonMarker = { x: number; y: number; type?: string };
 export class MapEntityLayer {
   private world: MapEntityWorld = {};
   private spawnRenderKey = '';
+  private headScale = 1;
 
   constructor(private readonly root: HTMLElement) {}
 
   setWorld(world: MapEntityWorld): void {
     this.world = world;
+  }
+
+  setMapScale(mapScale: number): void {
+    // Terraria uses this same capped curve for head icons on the full map.
+    this.headScale = Math.min(1, (mapScale * 0.4 + 1) / 3);
+    this.root.style.setProperty('--map-icon-scale', String(this.headScale));
   }
 
   private layer(name: string): HTMLElement {
@@ -103,17 +112,33 @@ export class MapEntityLayer {
       const point = this.markerPosition(player);
       if (!point) continue;
       const marker = document.createElement('div');
-      marker.className = 'marker player-marker';
-      marker.style.setProperty('--player-team-color', this.playerTeamColor(player.team));
+      marker.className = 'player-marker';
       marker.style.left = `${(point.x / this.world.width) * 100}%`;
       marker.style.top = `${(point.y / this.world.height) * 100}%`;
+      marker.setAttribute('aria-label', `Игрок ${player.name || 'без имени'}`);
       const avatar = this.makeAvatar(player);
-      if (avatar instanceof HTMLImageElement) avatar.classList.add('player-head-sprite');
+      if (avatar instanceof HTMLImageElement) {
+        avatar.classList.add('player-head-sprite');
+        if (player.direction === -1) avatar.classList.add('facing-left');
+        const outlineAvatar = () => {
+          if (!avatar.complete || avatar.naturalWidth < 1) return;
+          const outlinedAvatar = this.createOutlinedSprite(
+            avatar,
+            this.playerTeamColor(player.team),
+          );
+          if (outlinedAvatar && avatar.isConnected) {
+            outlinedAvatar.className = avatar.className;
+            avatar.replaceWith(outlinedAvatar);
+          }
+        };
+        avatar.addEventListener('load', outlineAvatar, { once: true });
+        marker.append(avatar);
+        layer.append(marker);
+        // Cached images may finish before a load listener can run.
+        if (avatar.complete && avatar.naturalWidth > 0) outlineAvatar();
+        continue;
+      }
       marker.append(avatar);
-      const name = document.createElement('span');
-      name.className = 'marker-name';
-      name.textContent = player.name || 'Игрок';
-      marker.append(name);
       layer.append(marker);
     }
   }
@@ -130,6 +155,100 @@ export class MapEntityLayer {
     };
     return teamColors[Number(team)] || teamColors[0];
   }
+
+  private createOutlinedSprite(
+    source: HTMLImageElement,
+    innerOutlineColor: string,
+  ): HTMLCanvasElement | null {
+    const sourceWidth = source.naturalWidth;
+    const sourceHeight = source.naturalHeight;
+    if (sourceWidth < 1 || sourceHeight < 1) return null;
+
+    const padding = 4;
+    const width = sourceWidth + padding * 2;
+    const height = sourceHeight + padding * 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return null;
+
+    try {
+      context.imageSmoothingEnabled = false;
+      context.drawImage(source, padding, padding);
+      const original = context.getImageData(padding, padding, sourceWidth, sourceHeight).data;
+      const output = context.createImageData(width, height);
+      const outputPixels = output.data;
+      const color = this.parseHexColor(innerOutlineColor);
+
+      this.drawOutlineRing(outputPixels, original, sourceWidth, sourceHeight, width, 4, [0, 0, 0]);
+      this.drawOutlineRing(outputPixels, original, sourceWidth, sourceHeight, width, 2, color);
+      this.drawOriginalSprite(outputPixels, original, sourceWidth, sourceHeight, width, padding);
+
+      context.putImageData(output, 0, 0);
+      return canvas;
+    } catch {
+      return null;
+    }
+  }
+
+  private drawOutlineRing(
+    destination: Uint8ClampedArray,
+    source: Uint8ClampedArray,
+    sourceWidth: number,
+    sourceHeight: number,
+    destinationWidth: number,
+    radius: number,
+    color: [number, number, number],
+  ): void {
+    const padding = 4;
+    for (let offsetY = -radius; offsetY <= radius; offsetY += 2) {
+      for (let offsetX = -radius; offsetX <= radius; offsetX += 2) {
+        if (Math.abs(offsetX) + Math.abs(offsetY) !== radius) continue;
+        for (let y = 0; y < sourceHeight; y++) {
+          for (let x = 0; x < sourceWidth; x++) {
+            const sourceOffset = (y * sourceWidth + x) * 4;
+            const alpha = source[sourceOffset + 3];
+            if (alpha === 0) continue;
+            const targetX = x + padding + offsetX;
+            const targetY = y + padding + offsetY;
+            const targetOffset = (targetY * destinationWidth + targetX) * 4;
+            destination[targetOffset] = color[0];
+            destination[targetOffset + 1] = color[1];
+            destination[targetOffset + 2] = color[2];
+            destination[targetOffset + 3] = Math.max(destination[targetOffset + 3], alpha);
+          }
+        }
+      }
+    }
+  }
+
+  private drawOriginalSprite(
+    destination: Uint8ClampedArray,
+    source: Uint8ClampedArray,
+    sourceWidth: number,
+    sourceHeight: number,
+    destinationWidth: number,
+    padding: number,
+  ): void {
+    for (let y = 0; y < sourceHeight; y++) {
+      for (let x = 0; x < sourceWidth; x++) {
+        const sourceOffset = (y * sourceWidth + x) * 4;
+        const targetOffset = ((y + padding) * destinationWidth + x + padding) * 4;
+        destination[targetOffset] = source[sourceOffset];
+        destination[targetOffset + 1] = source[sourceOffset + 1];
+        destination[targetOffset + 2] = source[sourceOffset + 2];
+        destination[targetOffset + 3] = source[sourceOffset + 3];
+      }
+    }
+  }
+
+  private parseHexColor(value: string): [number, number, number] {
+    const match = /^#([0-9a-f]{6})$/i.exec(value);
+    const color = match ? Number.parseInt(match[1], 16) : 0xffffff;
+    return [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff];
+  }
+
   drawEntities(entities: MapNpcMarker[]) {
     const layer = this.layer('entities');
     layer.replaceChildren();
@@ -152,26 +271,34 @@ export class MapEntityLayer {
       marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
       marker.title = entity.name || (entity.boss ? 'Босс' : 'NPC');
       const icon = document.createElement('img');
-      icon.src = entity.icon_url;
       icon.alt = '';
       icon.draggable = false;
+      const outlineIcon = () => {
+        if (!icon.complete || icon.naturalWidth < 1) return;
+        const outlinedIcon = this.createOutlinedSprite(icon, '#ffffff');
+        if (outlinedIcon && icon.isConnected) {
+          outlinedIcon.className = 'entity-head-sprite';
+          icon.replaceWith(outlinedIcon);
+        }
+      };
+      icon.addEventListener('load', outlineIcon, { once: true });
       icon.addEventListener('error', () => {
-        if (!icon.dataset.retried) {
-          icon.dataset.retried = 'true';
-          icon.src = `${entity.icon_url}?retry=${Date.now()}`;
+        const retryCount = Number(icon.dataset.retryCount || 0);
+        if (retryCount < 3) {
+          const nextRetry = retryCount + 1;
+          icon.dataset.retryCount = String(nextRetry);
+          window.setTimeout(() => {
+            if (!marker.isConnected) return;
+            icon.src = `${entity.icon_url}?retry=${Date.now()}-${nextRetry}`;
+          }, nextRetry * 500);
           return;
         }
-        const fallback = document.createElement('span');
-        fallback.className = 'entity-image-fallback';
-        fallback.textContent =
-          String(entity.name || (entity.boss ? 'B' : 'N'))
-            .trim()
-            .charAt(0)
-            .toUpperCase() || 'N';
-        marker.replaceChildren(fallback);
+        marker.remove();
       });
       marker.append(icon);
       layer.append(marker);
+      icon.src = entity.icon_url;
+      if (icon.complete && icon.naturalWidth > 0) outlineIcon();
     }
   }
   drawDroppedCoins(coins: MapCoinMarker[]) {

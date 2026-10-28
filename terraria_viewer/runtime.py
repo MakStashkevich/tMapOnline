@@ -51,7 +51,8 @@ def _server_command(config: dict[str, Any]) -> tuple[list[str], Path]:
     if not world.is_file():
         raise FileNotFoundError(f"Terraria world file is unavailable: {world}")
     command = [str(launcher), "-nosteam", "-world", str(world), "-port", str(game["game_port"]), "-maxplayers", str(game["max_players"]), "-secure"]
-    if sys.platform == "darwin" and platform.machine() == "x86_64":
+    if sys.platform == "darwin" and platform.machine() in {"arm64", "x86_64"}:
+        # The current tModLoader server bundle is x86_64 even when Viewer runs natively on Apple Silicon.
         command.insert(0, "/usr/bin/arch")
         command.insert(1, "-x86_64")
     return command, game_dir

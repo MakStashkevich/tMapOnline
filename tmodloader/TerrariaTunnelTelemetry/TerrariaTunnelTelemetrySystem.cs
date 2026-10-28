@@ -176,6 +176,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                     entry.joinedAtUnix,
                     entry.sessionSeconds,
                     team = (int)entry.player.team,
+                    direction = entry.player.direction,
                     teleported,
                     position = new
                     {
