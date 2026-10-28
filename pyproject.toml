@@ -25,6 +25,8 @@ terraria_viewer = ["web/**/*.html", "web/**/*.css", "web/**/*.js", "web/**/*.ts"
 [tool.pyright]
 include = ["terraria_viewer", "tests", "tools"]
 exclude = ["**/__pycache__", "**/node_modules", "**/.venv", "dist", "tmodloader"]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.9"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
