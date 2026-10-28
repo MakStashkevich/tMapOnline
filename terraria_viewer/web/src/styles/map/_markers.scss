@@ -1,0 +1,72 @@
+.markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+.pylon-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.pylon-marker {
+  position: absolute;
+  display: block;
+  transform: translate(-50%, -50%);
+  width: 28px;
+  height: 38px;
+}
+.pylon-icon {
+  display: block;
+  width: 28px;
+  height: 38px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 2px #000);
+}
+.spawn-marker {
+  position: absolute;
+  display: block;
+  width: 22px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  image-rendering: pixelated;
+}
+.spawn-icon {
+  display: block;
+  width: 22px;
+  height: 24px;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 2px #000);
+}
+.marker {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid #60768b;
+  border-radius: 20px;
+  background: #101820ed;
+  box-shadow: 0 2px 12px #0009;
+  white-space: nowrap;
+}
+.marker img,
+.marker .avatar-fallback {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+  image-rendering: pixelated;
+  background: #263544;
+}
+.marker-name {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 650;
+  text-shadow: 0 1px 3px #000;
+}

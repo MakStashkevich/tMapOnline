@@ -1,0 +1,49 @@
+.tool {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: var(--shell-text);
+  background: var(--shell-hover);
+  border: 1px solid var(--shell-line);
+  border-radius: 9px;
+  cursor: pointer;
+}
+.tool:hover {
+  filter: brightness(1.06);
+}
+.ui-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  stroke-width: 1.8;
+}
+.menu-toggle {
+  flex: none;
+  width: 42px;
+  height: 42px;
+}
+#fit,
+#download-map,
+.download-tool {
+  width: auto;
+  padding: 0 11px;
+  font-size: 13px;
+}
+.download-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.download-tool .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+.section-error .tool {
+  display: flex;
+  width: auto;
+  gap: 8px;
+  padding: 0 12px;
+}

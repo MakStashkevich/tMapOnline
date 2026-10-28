@@ -1,0 +1,39 @@
+version: 1
+
+server:
+  host: 127.0.0.1
+  port: 8765
+  telemetry_host: 127.0.0.1
+  telemetry_port: 38762
+
+terraria:
+  game_dir: ~/Library/Application Support/Steam/steamapps/common/tModLoader
+  world: ~/Library/Application Support/Terraria/tModLoader/Worlds/calamity2.wld
+  game_port: 7777
+  max_players: 8
+
+storage:
+  data_dir: ~/Library/Application Support/TerrariaTunnel
+
+tunnel_status_file: ~/Library/Application Support/TerrariaTunnel/tunnel-status.json
+
+site:
+  pages:
+    world_map:
+      enabled: true
+  sections:
+    world: true
+    players: true
+    bosses: true
+    server: true
+    activity: true
+  modules:
+    world_map.exploration: true
+    world_map.routes: true
+    world_map.players: true
+    world_map.entities: true
+    world_map.coins: true
+    world_map.pylons: true
+    world_map.spawn: true
+    world_map.tooltips: true
+    world_map.debug: true

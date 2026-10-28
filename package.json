@@ -1,0 +1,21 @@
+{
+  "name": "terraria-world-viewer-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build-web.mjs",
+    "typecheck": "tsc --noEmit",
+    "check:format": "prettier --check \"terraria_viewer/web/src/**/*.{ts,scss}\" \"terraria_viewer/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",
+    "format": "prettier --write \"terraria_viewer/web/src/**/*.{ts,scss}\" \"terraria_viewer/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",
+    "check:web": "npm run check:format && npm run typecheck && npm run build"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11",
+    "prettier": "^3.9.10",
+    "sass": "^1.93.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "lucide": "^1.63.0"
+  }
+}

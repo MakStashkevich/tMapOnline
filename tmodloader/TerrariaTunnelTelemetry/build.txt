@@ -1,0 +1,8 @@
+displayName = Terraria Tunnel Telemetry
+author = MakStashkevich
+version = 1.0.0
+side = Server
+hideCode = true
+hideResources = true
+includeSource = false
+buildIgnore = *.csproj, *.user, obj\*, bin\*, .vs\*, Old\*

@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+config.local.yaml
+*.log
+*.pid
+*.sock
+dist/
+build/
+node_modules/
+*.egg-info/
+tmodloader/TerrariaTunnelTelemetry/bin/
+tmodloader/TerrariaTunnelTelemetry/obj/
+tmodloader/TerrariaTunnelTelemetry/*.tmod

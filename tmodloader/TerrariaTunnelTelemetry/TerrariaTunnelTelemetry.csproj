@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TmlRoot Condition="'$(TmlRoot)' == ''">$(TML_ROOT)</TmlRoot>
+    <TmlTargets>$(TmlRoot)/tMLMod.targets</TmlTargets>
+  </PropertyGroup>
+
+  <Import Project="$(TmlTargets)" Condition="Exists('$(TmlTargets)')" />
+
+  <Target Name="RequireTmlTargets" BeforeTargets="PrepareForBuild" Condition="!Exists('$(TmlTargets)')">
+    <Error Text="Set TmlRoot or TML_ROOT to the tModLoader installation directory containing tMLMod.targets." />
+  </Target>
+</Project>

@@ -1,0 +1,63 @@
+.map-viewport {
+  display: grid;
+  place-items: safe center;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background-color: #0a1016;
+  background-image:
+    linear-gradient(#121c26 1px, transparent 1px),
+    linear-gradient(90deg, #121c26 1px, transparent 1px);
+  background-size: 32px 32px;
+  cursor: grab;
+  scrollbar-color: #425468 #131d27;
+}
+.map-viewport.dragging {
+  cursor: grabbing;
+}
+.map-stage {
+  position: relative;
+  flex: 0 0 auto;
+  margin: auto;
+  background: #05090d;
+  box-shadow: 0 0 0 1px #34475a;
+  overflow: hidden;
+}
+#map-preview,
+#chunk-layer,
+.map-stage #paths {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+#map-preview {
+  image-rendering: auto;
+}
+#chunk-layer {
+  overflow: hidden;
+}
+.map-chunk {
+  position: absolute;
+  display: block;
+  image-rendering: auto;
+  pointer-events: none;
+}
+.map-stage.pixelated .map-chunk {
+  image-rendering: pixelated;
+}
+#paths {
+  overflow: hidden;
+}
+#paths path {
+  fill: none;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}

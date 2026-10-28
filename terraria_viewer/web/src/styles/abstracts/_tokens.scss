@@ -1,0 +1,28 @@
+:root {
+  color-scheme: dark;
+  --bg: #10151c;
+  --panel: #19232e;
+  --line: #304254;
+  --text: #edf4fb;
+  --muted: #9badbd;
+  --green: #56d49a;
+  --blue: #70b7ff;
+  --shell-bg: #10151c;
+  --shell-panel: #151e28;
+  --shell-card: #111922;
+  --shell-line: #304254;
+  --shell-text: #edf4fb;
+  --shell-muted: #9badbd;
+  --shell-hover: #202c38;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --shell-bg: #edf2f6;
+  --shell-panel: #fff;
+  --shell-card: #f7f9fb;
+  --shell-line: #cbd6e0;
+  --shell-text: #182431;
+  --shell-muted: #5e7081;
+  --shell-hover: #e8eef4;
+}

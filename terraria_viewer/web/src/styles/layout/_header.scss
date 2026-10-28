@@ -1,0 +1,31 @@
+.topbar {
+  z-index: 3;
+  display: flex;
+  min-height: 62px;
+  flex: none;
+  align-items: center;
+  gap: 13px;
+  padding: 8px 14px;
+  color: var(--shell-text);
+  background: var(--shell-panel);
+  border-bottom: 1px solid var(--shell-line);
+}
+.heading {
+  min-width: 0;
+  flex: 1;
+}
+.heading h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+.heading #subtitle {
+  margin-top: 3px;
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}

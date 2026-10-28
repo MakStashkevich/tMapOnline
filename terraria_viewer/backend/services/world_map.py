@@ -1,0 +1,453 @@
+from __future__ import annotations
+
+from ..store_common import (
+    Any,
+    WORLD_MAP_CHUNK_SIZE,
+    _decode_player_map,
+    _draw_route_mask,
+    _encode_player_map_rows,
+    _read_map_mask_png,
+    _union_map_masks,
+    base64,
+    hashlib,
+    re,
+    struct,
+    time,
+    urllib,
+    zlib,
+)
+
+
+class WorldMapMixin:
+    def world_map_summary(self) -> dict[str, Any]:
+        """Compact current-world counters for the on-demand map-data view."""
+        with self._lock:
+            world_id = self._server_info.get("world_id")
+            world_name = str(self._server_info.get("world") or "")
+            width = self._server_info.get("world_width")
+            height = self._server_info.get("world_height")
+            pylons: list[dict[str, Any]] = []
+            for cache in self._world_map_cache.values():
+                if world_id is not None and str(cache.get("world_id")) != str(world_id):
+                    continue
+                if world_name and str(cache.get("world_name") or "").casefold() != world_name.casefold():
+                    continue
+                width = cache.get("width", width)
+                height = cache.get("height", height)
+                if isinstance(cache.get("pylons"), list):
+                    pylons = [item for item in cache["pylons"] if isinstance(item, dict)]
+                break
+            scan = self._server_info.get("map_scan")
+            age = None if self._telemetry_received_at is None else max(0, time.time() - self._telemetry_received_at)
+            entities = len(self._active_npcs) if age is not None and age <= 5 else 0
+            coins = len(self._active_coins) if age is not None and age <= 5 else 0
+            return {
+                "world": {"id": world_id, "name": world_name or None, "width": width, "height": height},
+                "scan": dict(scan) if isinstance(scan, dict) else None,
+                "pylons": len(pylons),
+                "entities": entities,
+                "coins": coins,
+                "updated_at": self._telemetry_received_at,
+            }
+
+    def player_map(self, player_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            record = self._players.get(player_id)
+            if record is None:
+                return None
+            movement = self._load_movement(player_id)
+            return {
+                "id": player_id,
+                "name": record.get("name"),
+                "avatar_url": record.get("avatar_url"),
+                "worlds": {
+                    key: {
+                        **{field: value for field, value in world.items() if field not in {"visited_tiles", "positions"}},
+                        "visited_tiles": list(world.get("visited_tiles", [])),
+                        "positions": [dict(point) for point in world.get("positions", []) if isinstance(point, dict)],
+                    }
+                    for key, world in movement.get("worlds", {}).items()
+                },
+            }
+
+    def world_map(self, world_id: str | None = None, since: float = 0) -> dict[str, Any]:
+        with self._lock:
+            active_id = self._server_info.get("world_id")
+            requested = str(world_id if world_id not in (None, "") else active_id or "")
+            active_name = str(self._server_info.get("world") or "")
+            players = []
+            online_player_ids = set(self._online_player_ids)
+            telemetry_age = None if self._telemetry_received_at is None else max(0, time.time() - self._telemetry_received_at)
+            active_npcs = []
+            if telemetry_age is not None and telemetry_age <= 5 and self._active_npcs_world_id in {str(active_id), active_name}:
+                if not requested or requested in {self._active_npcs_world_id, active_name}:
+                    active_npcs = [dict(item) for item in self._active_npcs]
+            active_coins = []
+            if telemetry_age is not None and telemetry_age <= 5 and self._active_coins_world_id in {str(active_id), active_name}:
+                if not requested or requested in {self._active_coins_world_id, active_name}:
+                    active_coins = [dict(item) for item in self._active_coins]
+            selected_world: dict[str, Any] | None = None
+            base_chunks_raw: dict[str, Any] = {}
+            base_chunk_times: dict[str, Any] = {}
+            pylons: list[dict[str, Any]] = []
+            map_updated_at = 0.0
+            tile_info_updated_at = 0.0
+            for world_cache in self._world_map_cache.values():
+                stored_id = world_cache.get("world_id")
+                name = str(world_cache.get("world_name") or "")
+                if requested and requested not in {str(stored_id or ""), name}:
+                    continue
+                if not requested and active_name and name.casefold() != active_name.casefold():
+                    continue
+                selected_world = world_cache
+                if isinstance(world_cache.get("pylons"), list):
+                    pylons = [item for item in world_cache["pylons"] if isinstance(item, dict)]
+                if isinstance(world_cache.get("base_map_chunks"), dict):
+                    base_chunks_raw.update(world_cache["base_map_chunks"])
+                if isinstance(world_cache.get("base_map_chunk_times"), dict):
+                    base_chunk_times.update(world_cache["base_map_chunk_times"])
+                try:
+                    tile_info_updated_at = max(tile_info_updated_at, float(world_cache.get("tile_info_updated_at", 0)))
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    map_updated_at = max(map_updated_at, float(world_cache.get("map_updated_at", 0)))
+                except (TypeError, ValueError):
+                    pass
+            for player_id, record in self._players.items():
+                movement = self._load_movement(player_id)
+                for key, world in movement.get("worlds", {}).items():
+                    stored_id = world.get("world_id")
+                    name = str(world.get("world_name") or "")
+                    if requested and requested not in {str(key), str(stored_id or ""), name}:
+                        continue
+                    if not requested and active_name and name.casefold() != active_name.casefold():
+                        continue
+                    selected_world = selected_world or world
+                    # Read earlier per-player caches for backward compatibility.
+                    base_chunks_raw.update(world.get("base_map_chunks", {}) if isinstance(world.get("base_map_chunks"), dict) else {})
+                    base_chunk_times.update(world.get("base_map_chunk_times", {}) if isinstance(world.get("base_map_chunk_times"), dict) else {})
+                    for stamp in world.get("base_map_chunk_times", {}).values() if isinstance(world.get("base_map_chunk_times"), dict) else ():
+                        try:
+                            map_updated_at = max(map_updated_at, float(stamp))
+                        except (TypeError, ValueError):
+                            pass
+                    try:
+                        map_updated_at = max(map_updated_at, float(world.get("map_updated_at", 0)))
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        tile_info_updated_at = max(tile_info_updated_at, float(world.get("tile_info_updated_at", 0)))
+                    except (TypeError, ValueError):
+                        pass
+                    raw_chunks = world.get("map_chunks") if isinstance(world.get("map_chunks"), dict) else {}
+                    chunks = []
+                    for chunk_key, data in raw_chunks.items():
+                        try:
+                            chunk_x, chunk_y = (int(value) for value in str(chunk_key).split(",", 1))
+                        except (TypeError, ValueError):
+                            continue
+                        chunks.append({"x": chunk_x, "y": chunk_y, "data": data})
+                    exploration = world.get("map_exploration")
+                    expected_exploration_filename = f"{stored_id}-{hashlib.sha256(player_id.encode('utf-8')).hexdigest()[:32]}.png"
+                    has_imported_map = (
+                        isinstance(exploration, dict)
+                        and exploration.get("filename") == expected_exploration_filename
+                        and (self._exploration_dir / expected_exploration_filename).is_file()
+                    )
+                    players.append({
+                        "id": player_id,
+                        "name": record.get("name"),
+                        "avatar_url": record.get("avatar_url"),
+                        "online": player_id in online_player_ids,
+                        "position": record.get("position"),
+                        "positions": [dict(point) for point in world.get("positions", []) if isinstance(point, dict)],
+                        "chunks": chunks,
+                        "has_imported_map": has_imported_map,
+                        "can_export_map": (
+                            bool(world.get("positions") or world.get("visited_tiles") or has_imported_map)
+                            and stored_id is not None
+                            and (self._exploration_dir / f"{stored_id}.header").is_file()
+                        ),
+                        "exploration_url": (
+                            f"/api/world-map/exploration?id={urllib.parse.quote(player_id, safe='')}&world={urllib.parse.quote(str(stored_id or ''), safe='')}&v={int(float(world['map_exploration'].get('updated_at', 0)) * 1000)}"
+                            if isinstance(world.get("map_exploration"), dict) else None
+                        ),
+                    })
+            selected_world = selected_world or {}
+            scan = self._server_info.get("map_scan")
+            if isinstance(scan, dict) and requested and str(scan.get("worldId")) != requested:
+                scan = None
+            elif isinstance(scan, dict):
+                scan = dict(scan)
+                telemetry_age = None if self._telemetry_received_at is None else max(0, int(time.time() - self._telemetry_received_at))
+                scan["telemetryAgeSeconds"] = telemetry_age
+                if not self._game_running or telemetry_age is None or telemetry_age > 5:
+                    scan["active"] = False
+                    scan["stale"] = True
+            return {
+                "world": {
+                    "id": selected_world.get("world_id", active_id),
+                    "name": selected_world.get("world_name", active_name),
+                    "width": selected_world.get("width", self._server_info.get("world_width")),
+                    "height": selected_world.get("height", self._server_info.get("world_height")),
+                    "spawn_x": selected_world.get("spawn_x"),
+                    "spawn_y": selected_world.get("spawn_y"),
+                },
+                "chunk_size": WORLD_MAP_CHUNK_SIZE,
+                "base_chunks": [
+                    {"x": int(key.split(",", 1)[0]), "y": int(key.split(",", 1)[1]), "data": value}
+                    for key, value in base_chunks_raw.items()
+                    if since <= 0 or float(base_chunk_times.get(key, 0)) > since
+                ],
+                "players": players,
+                "active_npcs": active_npcs,
+                "coins": active_coins,
+                "pylons": pylons,
+                "scan": scan,
+                "updated_at": map_updated_at,
+                "tile_info_updated_at": tile_info_updated_at,
+            }
+
+    def world_map_tile(self, world_id: str | None, tile_x: int, tile_y: int) -> dict[str, Any] | None:
+        with self._lock:
+            requested = str(world_id or self._server_info.get("world_id") or "")
+            selected: dict[str, Any] | None = None
+            for world_cache in self._world_map_cache.values():
+                if requested and requested not in {
+                    str(world_cache.get("world_id") or ""),
+                    str(world_cache.get("world_name") or ""),
+                }:
+                    continue
+                selected = world_cache
+                break
+            tile_chunks: dict[str, str] = {}
+            tile_names: dict[str, str] = {}
+            if selected is not None:
+                if isinstance(selected.get("tile_chunks"), dict):
+                    tile_chunks.update(selected["tile_chunks"])
+                if isinstance(selected.get("tile_names"), dict):
+                    tile_names.update(selected["tile_names"])
+            for player_id in self._players:
+                movement = self._load_movement(player_id)
+                for key, world in movement.get("worlds", {}).items():
+                    if requested and requested not in {
+                        str(key), str(world.get("world_id") or ""), str(world.get("world_name") or "")
+                    }:
+                        continue
+                    if selected is None:
+                        selected = world
+                    if isinstance(world.get("tile_chunks"), dict):
+                        tile_chunks.update(world["tile_chunks"])
+                    if isinstance(world.get("tile_names"), dict):
+                        tile_names.update(world["tile_names"])
+            if selected is None:
+                return None
+            try:
+                if tile_x < 0 or tile_y < 0 or tile_x >= int(selected.get("width", 0)) or tile_y >= int(selected.get("height", 0)):
+                    return None
+            except (TypeError, ValueError):
+                return None
+            chunk_size = WORLD_MAP_CHUNK_SIZE
+            key = f"{tile_x // chunk_size},{tile_y // chunk_size}"
+            encoded = tile_chunks.get(key)
+            if isinstance(selected.get("tile_names"), dict):
+                # The server-side localized map catalog is authoritative over
+                # older per-player movement captures, which may contain stale
+                # or numeric fallback names.
+                tile_names = {**tile_names, **selected["tile_names"]}
+            if not encoded:
+                return None
+            try:
+                raw = zlib.decompress(base64.b64decode(encoded, validate=True))
+                if len(raw) != chunk_size * chunk_size * 4:
+                    return None
+                offset = ((tile_y % chunk_size) * chunk_size + tile_x % chunk_size) * 4
+                tile_value, wall_value = struct.unpack_from("<HH", raw, offset)
+            except (TypeError, ValueError, zlib.error, struct.error):
+                return None
+            tile_id = tile_value - 1 if tile_value else None
+            wall_id = wall_value - 1 if wall_value else None
+            return {
+                "x": tile_x,
+                "y": tile_y,
+                "tile_id": tile_id,
+                "tile_name": tile_names.get(f"t{tile_id}") if tile_id is not None else None,
+                "wall_id": wall_id,
+                "wall_name": tile_names.get(f"w{wall_id}") if wall_id is not None else None,
+            }
+
+    def import_player_map(self, player_id: str, data: bytes, world_id: str | None = None) -> dict[str, Any]:
+        info, png, opened_tiles = _decode_player_map(data)
+        if world_id and str(info["world_id"]) != str(world_id):
+            raise ValueError("Файл карты относится к другому миру.")
+        if info["world_id"] is None:
+            raise ValueError("В файле карты отсутствует ID мира.")
+        with self._lock:
+            telemetry_age = None if self._telemetry_received_at is None else max(0, time.time() - self._telemetry_received_at)
+            if telemetry_age is None or telemetry_age > 10:
+                raise ValueError("Не удалось подтвердить текущий мир сервера: нет свежих данных телеметрии.")
+            movement = self._load_movement(player_id)
+            player = movement.get("player", {}) if isinstance(movement.get("player"), dict) else {}
+            if not player.get("name") and player_id in self._players:
+                player = {**player, "name": self._players[player_id].get("name")}
+                movement["player"] = player
+            if not player.get("name"):
+                raise ValueError("Не найден игрок для выбранного ID.")
+            current_world_id = self._server_info.get("world_id")
+            current_name = str(self._server_info.get("world") or "")
+            width = self._server_info.get("world_width")
+            height = self._server_info.get("world_height")
+            if current_world_id in (None, "") or not current_name or not width or not height:
+                raise ValueError("Не удалось подтвердить ID и размер текущего мира сервера.")
+            if str(current_world_id) != str(info["world_id"]):
+                raise ValueError("Файл карты относится к другому миру.")
+            if current_name.casefold() != str(info["world_name"]).casefold():
+                raise ValueError("Имя мира в файле не совпадает с текущим миром.")
+            if int(width) != info["width"] or int(height) != info["height"]:
+                raise ValueError("Размер мира в файле не совпадает с текущим миром.")
+            world_key, world = self._world_movement_record(movement, {
+                "id": info["world_id"], "name": info["world_name"],
+                "width": info["width"], "height": info["height"],
+            })
+            digest = hashlib.sha256(player_id.encode("utf-8")).hexdigest()[:32]
+            filename = f"{info['world_id']}-{digest}.png"
+            self._exploration_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            target = self._exploration_dir / filename
+            merged_png = png
+            merged_opened_tiles = opened_tiles
+            previous_exploration = world.get("map_exploration")
+            merged_existing = isinstance(previous_exploration, dict)
+            if merged_existing:
+                previous_filename = str(previous_exploration.get("filename") or "")
+                if previous_filename != filename:
+                    raise ValueError("Сохранённая карта игрока не прошла проверку и не была изменена.")
+                try:
+                    previous_png = target.read_bytes()
+                except OSError as error:
+                    raise ValueError("Не удалось прочитать предыдущую карту игрока; она не была заменена.") from error
+                merged_png, merged_opened_tiles = _union_map_masks(
+                    previous_png, png, info["mask_width"], info["mask_height"],
+                )
+            temporary = target.with_suffix(".png.tmp")
+            temporary.write_bytes(merged_png)
+            temporary.replace(target)
+            header_path = self._exploration_dir / f"{info['world_id']}.header"
+            header_temporary = header_path.with_suffix(".header.tmp")
+            header_temporary.write_bytes(data[:info["stream_offset"]])
+            header_temporary.replace(header_path)
+            updated_at = time.time()
+            world["map_exploration"] = {
+                "filename": filename,
+                "world_id": info["world_id"], "world_name": info["world_name"],
+                "width": info["width"], "height": info["height"],
+                "mask_width": info["mask_width"], "mask_height": info["mask_height"],
+                "opened_tiles": merged_opened_tiles, "updated_at": updated_at,
+            }
+            movement["updated_at"] = updated_at
+            self._save_movement(player_id)
+        return {"player": player.get("name"), "world": info["world_name"], "opened_tiles": merged_opened_tiles, "merged": merged_existing, "mask_width": info["mask_width"], "mask_height": info["mask_height"], "updated_at": updated_at}
+
+    def player_exploration_image(self, player_id: str, world_id: str) -> bytes | None:
+        with self._lock:
+            movement = self._load_movement(player_id)
+            for key, world in movement.get("worlds", {}).items():
+                if str(world.get("world_id") or key.split(":", 1)[0]) != str(world_id):
+                    continue
+                exploration = world.get("map_exploration")
+                if not isinstance(exploration, dict):
+                    continue
+                filename = str(exploration.get("filename") or "")
+                if filename != f"{world_id}-{hashlib.sha256(player_id.encode('utf-8')).hexdigest()[:32]}.png":
+                    continue
+                try:
+                    return (self._exploration_dir / filename).read_bytes()
+                except OSError:
+                    return None
+        return None
+
+    def clear_player_imported_map(self, player_id: str, world_id: str) -> dict[str, Any]:
+        """Remove only the imported .map mask; keep movement-derived exploration intact."""
+        if not player_id or len(player_id) > 128 or not world_id or len(world_id) > 64:
+            raise ValueError("Не выбран игрок или мир.")
+        with self._lock:
+            if str(self._server_info.get("world_id") or "") != str(world_id):
+                raise ValueError("Можно очистить импорт только для текущего мира сервера.")
+            movement = self._load_movement(player_id)
+            removed = False
+            removed_filename = None
+            for world_key, world in movement.get("worlds", {}).items():
+                if str(world.get("world_id") or str(world_key).split(":", 1)[0]) != str(world_id):
+                    continue
+                exploration = world.get("map_exploration")
+                if not isinstance(exploration, dict):
+                    continue
+                filename = str(exploration.get("filename") or "")
+                expected = f"{world_id}-{hashlib.sha256(player_id.encode('utf-8')).hexdigest()[:32]}.png"
+                if filename != expected:
+                    raise ValueError("Файл импортированной карты игрока не прошёл проверку.")
+                world.pop("map_exploration", None)
+                removed = True
+                removed_filename = filename
+                break
+            if removed:
+                self._save_movement(player_id)
+                try:
+                    (self._exploration_dir / removed_filename).unlink()
+                except FileNotFoundError:
+                    pass
+            player = movement.get("player", {})
+            return {"player": player.get("name") or player_id, "world_id": world_id, "removed": removed}
+
+    def export_player_map(self, player_id: str, world_id: str) -> tuple[bytes, str]:
+        """Build a Terraria .map from saved imported masks and movement exploration."""
+        if not player_id or len(player_id) > 128 or not world_id or len(world_id) > 64:
+            raise ValueError("Не выбран игрок или мир.")
+        with self._lock:
+            if str(self._server_info.get("world_id") or "") != str(world_id):
+                raise ValueError("Можно скачать карту только для текущего мира сервера.")
+            movement = self._load_movement(player_id)
+            world = next((item for key, item in movement.get("worlds", {}).items()
+                          if str(item.get("world_id") or str(key).split(":", 1)[0]) == str(world_id)), None)
+            if world is None:
+                raise ValueError("Для этого игрока пока нет сохранённых данных карты.")
+            width, height = int(world.get("width") or 0), int(world.get("height") or 0)
+            if not width or not height:
+                width = int(self._server_info.get("world_width") or 0)
+                height = int(self._server_info.get("world_height") or 0)
+            if not width or not height:
+                raise ValueError("Не удалось определить размер мира для карты.")
+            header_path = self._exploration_dir / f"{world_id}.header"
+            try:
+                header = header_path.read_bytes()
+            except OSError as error:
+                raise ValueError("Сначала загрузите любой .map этого мира, чтобы сохранить совместимый заголовок.") from error
+            exploration = world.get("map_exploration")
+            imported_png = None
+            if isinstance(exploration, dict):
+                expected = f"{world_id}-{hashlib.sha256(player_id.encode('utf-8')).hexdigest()[:32]}.png"
+                if str(exploration.get("filename") or "") != expected:
+                    raise ValueError("Сохранённая карта игрока не прошла проверку.")
+                try:
+                    imported_png = (self._exploration_dir / expected).read_bytes()
+                except OSError as error:
+                    raise ValueError("Не удалось прочитать импортированную карту игрока.") from error
+            positions = [dict(point) for point in world.get("positions", []) if isinstance(point, dict)]
+            visited_tiles = list(world.get("visited_tiles", []))
+            player_name = str(movement.get("player", {}).get("name") or player_id)
+
+        mask_width, mask_height = (width + 3) // 4, (height + 3) // 4
+        mask = bytearray(mask_width * mask_height)
+        if imported_png is not None:
+            png_width, png_height, rgba = _read_map_mask_png(imported_png)
+            if (png_width, png_height) != (mask_width, mask_height):
+                raise ValueError("Размер сохранённой карты игрока не совпадает с текущим миром.")
+            for index, alpha in enumerate(rgba[3::4]):
+                if alpha:
+                    mask[index] = 1
+        _draw_route_mask(mask, mask_width, mask_height, width, height, positions, visited_tiles)
+        raw_map = _encode_player_map_rows(mask, mask_width, mask_height, width, height)
+        compressor = zlib.compressobj(level=6, wbits=-15)
+        map_file = header + compressor.compress(raw_map) + compressor.flush()
+        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", player_name).strip("_") or "player"
+        return map_file, f"{safe_name}-{world_id}.map"
