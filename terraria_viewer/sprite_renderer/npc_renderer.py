@@ -35,11 +35,16 @@ class NpcSpriteRenderer:
         if frame is None:
             raise ValueError("NPC texture has no visible frame")
 
-        # Head-sheet entries are complete portraits; body textures need a square top crop.
-        portrait_size = min(width, height) if head_texture else min(width, max(12, (height * 44 + 99) // 100))
-        portrait_size = min(portrait_size, height)
-        crop_left = max(0, (width - portrait_size) // 2)
-        portrait = frame.crop((crop_left, 0, crop_left + portrait_size, portrait_size))
+        if head_texture:
+            # Registered NPC head icons can be wider than they are tall (slimes
+            # are a common example), so keep the complete source frame intact.
+            portrait = frame
+        else:
+            # Body-sheet fallbacks use a square crop around the top of humanoid NPCs.
+            portrait_size = min(width, max(12, (height * 44 + 99) // 100))
+            portrait_size = min(portrait_size, height)
+            crop_left = max(0, (width - portrait_size) // 2)
+            portrait = frame.crop((crop_left, 0, crop_left + portrait_size, portrait_size))
         alpha_bounds = portrait.getchannel("A").getbbox()
         if alpha_bounds is None:
             raise ValueError("NPC sprite frame is transparent")

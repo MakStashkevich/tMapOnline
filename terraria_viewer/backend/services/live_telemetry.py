@@ -221,7 +221,7 @@ class LiveTelemetryMixin(StoreMixinContract):
         if not source.is_file():
             return None
         # Bump this revision whenever silhouette extraction or outline rendering changes.
-        digest = hashlib.sha256(f"python-head-silhouette-outline-v9:{source_key}:{frame_width}x{frame_height}".encode("utf-8")).hexdigest()[:32]
+        digest = hashlib.sha256(f"python-head-silhouette-outline-v10:{source_key}:{frame_width}x{frame_height}".encode("utf-8")).hexdigest()[:32]
         output = self._npc_sprites_dir / f"{digest}.png"
         if output.is_file():
             try:
