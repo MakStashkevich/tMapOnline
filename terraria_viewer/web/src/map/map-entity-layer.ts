@@ -1,3 +1,10 @@
+import {
+  createOutlinedSprite,
+  defaultPlayerSprite,
+  loadSprite,
+  playerOutlineColor,
+} from '../core/sprite-renderer';
+
 const PYLON_TYPES: Record<string, string[]> = {
   Purity: ['Пилон леса', '#8be58e', 'Forest'],
   Forest: ['Пилон леса', '#8be58e', 'Forest'],
@@ -43,11 +50,21 @@ type MapCoinMarker = {
   icon_url?: string;
 };
 type MapPylonMarker = { x: number; y: number; type?: string };
+type MapDeathMarker = { id: string; name?: string; x: number; y: number; timestamp?: number };
+
+// This is Terraria's native MapDeath texture, drawn directly without extra decoration.
+const DEATH_SPRITE = '/assets/map-death.png';
 
 /** Renders map objects as DOM layers while keeping their sprite and fallback rules together. */
 export class MapEntityLayer {
   private world: MapEntityWorld = {};
   private spawnRenderKey = '';
+  private playerRenderVersion = 0;
+  private entityRenderVersion = 0;
+  private coinRenderVersion = 0;
+  private deathRenderVersion = 0;
+  private pylonRenderVersion = 0;
+  private spawnRenderVersion = 0;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -79,146 +96,62 @@ export class MapEntityLayer {
       ? { x, y }
       : null;
   }
-  makeAvatar(player: MapPlayerMarker) {
-    if (player.avatar_url) {
-      const img = document.createElement('img');
-      img.src = player.avatar_url;
-      img.alt = '';
-      img.loading = 'lazy';
-      img.onerror = () => {
-        const fallback = document.createElement('span');
-        fallback.className = 'avatar-fallback';
-        fallback.textContent = (player.name || '?').slice(0, 1).toUpperCase();
-        img.replaceWith(fallback);
-      };
-      return img;
-    }
-    const fallback = document.createElement('span');
-    fallback.className = 'avatar-fallback';
-    fallback.textContent = (player.name || '?').slice(0, 1).toUpperCase();
-    return fallback;
+  makeAvatar(player: MapPlayerMarker): HTMLElement {
+    const container = document.createElement('span');
+    container.className = 'player-toggle-avatar';
+    container.setAttribute('aria-hidden', 'true');
+    void this.renderPlayerAvatar(container, player);
+    return container;
   }
+
+  private async renderPlayerAvatar(container: HTMLElement, player: MapPlayerMarker): Promise<void> {
+    const source =
+      (await loadSprite(player.avatar_url || '')) || (await loadSprite(defaultPlayerSprite()));
+    if (!source || !container.isConnected) return;
+    const sprite = createOutlinedSprite(source, playerOutlineColor(player.team));
+    if (!sprite) return;
+    sprite.className = 'player-toggle-avatar-sprite';
+    container.replaceChildren(sprite);
+  }
+
   drawMarkers(players: MapPlayerMarker[]) {
     const layer = this.layer('markers');
     layer.replaceChildren();
+    const renderVersion = ++this.playerRenderVersion;
     for (const player of players) {
       const point = this.markerPosition(player);
       if (!point) continue;
-      const marker = document.createElement('div');
-      marker.className = 'player-marker';
-      marker.style.left = `${(point.x / this.world.width) * 100}%`;
-      marker.style.top = `${(point.y / this.world.height) * 100}%`;
-      marker.setAttribute('aria-label', `Игрок ${player.name || 'без имени'}`);
-      const avatar = this.makeAvatar(player);
-      if (avatar instanceof HTMLImageElement) {
-        avatar.classList.add('player-head-sprite');
-        if (player.direction === -1) avatar.classList.add('facing-left');
-        const outlineAvatar = () => {
-          if (!avatar.complete || avatar.naturalWidth < 1) return;
-          const outlinedAvatar = this.createOutlinedSprite(
-            avatar,
-            this.playerTeamColor(player.team),
-          );
-          if (outlinedAvatar && avatar.isConnected) {
-            outlinedAvatar.className = avatar.className;
-            avatar.replaceWith(outlinedAvatar);
-          }
-        };
-        avatar.addEventListener('load', outlineAvatar, { once: true });
-        marker.append(avatar);
-        layer.append(marker);
-        // Cached images may finish before a load listener can run.
-        if (avatar.complete && avatar.naturalWidth > 0) outlineAvatar();
-        continue;
-      }
-      marker.append(avatar);
-      layer.append(marker);
+      void this.appendPlayerMarker(layer, player, point, renderVersion);
     }
   }
 
-  private playerTeamColor(team: number | null | undefined): string {
-    // Keep the game palette local so dedicated-server rendering never depends on client graphics state.
-    const teamColors: Record<number, string> = {
-      0: '#ffffff',
-      1: '#da3b3b',
-      2: '#3bda55',
-      3: '#3b95da',
-      4: '#f2dd64',
-      5: '#e064f2',
-    };
-    return teamColors[Number(team)] || teamColors[0];
-  }
+  private async appendPlayerMarker(
+    layer: HTMLElement,
+    player: MapPlayerMarker,
+    point: { x: number; y: number },
+    renderVersion: number,
+  ): Promise<void> {
+    const source =
+      (await loadSprite(player.avatar_url || '')) || (await loadSprite(defaultPlayerSprite()));
+    if (!source || renderVersion !== this.playerRenderVersion) return;
+    const sprite = createOutlinedSprite(source, playerOutlineColor(player.team));
+    if (!sprite) return;
 
-  private createOutlinedSprite(
-    source: HTMLImageElement,
-    innerOutlineColor: string,
-  ): HTMLCanvasElement | null {
-    const sourceWidth = source.naturalWidth;
-    const sourceHeight = source.naturalHeight;
-    if (sourceWidth < 1 || sourceHeight < 1) return null;
-
-    const padding = 4;
-    const width = sourceWidth + padding * 2;
-    const height = sourceHeight + padding * 2;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) return null;
-
-    try {
-      context.imageSmoothingEnabled = false;
-      const blackSilhouette = this.createTintedSilhouette(source, '#000000');
-      const teamSilhouette = this.createTintedSilhouette(source, innerOutlineColor);
-      if (!blackSilhouette || !teamSilhouette) return null;
-
-      // Terraria's map outline is two color-only draw passes followed by the unmodified sprite.
-      // Drawing the silhouette layers with source-over preserves antialiased edge alpha.
-      this.drawTerrariaOutlineRing(context, blackSilhouette, padding, 4);
-      this.drawTerrariaOutlineRing(context, teamSilhouette, padding, 2);
-      context.drawImage(source, padding, padding);
-      return canvas;
-    } catch {
-      return null;
-    }
-  }
-
-  private createTintedSilhouette(
-    source: HTMLImageElement,
-    color: string,
-  ): HTMLCanvasElement | null {
-    const silhouette = document.createElement('canvas');
-    silhouette.width = source.naturalWidth;
-    silhouette.height = source.naturalHeight;
-    const context = silhouette.getContext('2d');
-    if (!context) return null;
-
-    context.imageSmoothingEnabled = false;
-    context.drawImage(source, 0, 0);
-    context.globalCompositeOperation = 'source-in';
-    context.fillStyle = color;
-    context.fillRect(0, 0, silhouette.width, silhouette.height);
-    context.globalCompositeOperation = 'source-over';
-    return silhouette;
-  }
-
-  private drawTerrariaOutlineRing(
-    destination: CanvasRenderingContext2D,
-    silhouette: HTMLCanvasElement,
-    padding: number,
-    radius: number,
-  ): void {
-    for (let offsetY = -radius; offsetY <= radius; offsetY += 2) {
-      for (let offsetX = -radius; offsetX <= radius; offsetX += 2) {
-        if (Math.abs(offsetX) + Math.abs(offsetY) !== radius) continue;
-        destination.drawImage(silhouette, padding + offsetX, padding + offsetY);
-      }
-    }
+    const marker = document.createElement('div');
+    marker.className = 'player-marker';
+    marker.style.left = `${(point.x / this.world.width) * 100}%`;
+    marker.style.top = `${(point.y / this.world.height) * 100}%`;
+    marker.setAttribute('aria-label', `Игрок ${player.name || 'без имени'}`);
+    sprite.className = 'player-head-sprite';
+    if (player.direction === -1) sprite.classList.add('facing-left');
+    marker.append(sprite);
+    layer.append(marker);
   }
 
   drawEntities(entities: MapNpcMarker[]) {
     const layer = this.layer('entities');
     layer.replaceChildren();
+    const renderVersion = ++this.entityRenderVersion;
     for (const entity of entities || []) {
       const x = Number(entity.x),
         y = Number(entity.y);
@@ -232,46 +165,35 @@ export class MapEntityLayer {
         !entity.icon_url
       )
         continue;
-      const marker = document.createElement('div');
-      marker.className = `entity-marker${entity.boss ? ' boss' : ''}`;
-      marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
-      marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
-      marker.title = entity.name || (entity.boss ? 'Босс' : 'NPC');
-      const icon = document.createElement('img');
-      icon.alt = '';
-      icon.draggable = false;
-      const outlineIcon = () => {
-        if (!icon.complete || icon.naturalWidth < 1) return;
-        const outlinedIcon = this.createOutlinedSprite(icon, '#ffffff');
-        if (outlinedIcon && icon.isConnected) {
-          outlinedIcon.className = 'entity-head-sprite';
-          icon.replaceWith(outlinedIcon);
-        }
-      };
-      icon.addEventListener('load', outlineIcon, { once: true });
-      icon.addEventListener('error', () => {
-        const retryCount = Number(icon.dataset.retryCount || 0);
-        if (retryCount < 3) {
-          const nextRetry = retryCount + 1;
-          icon.dataset.retryCount = String(nextRetry);
-          window.setTimeout(() => {
-            if (!marker.isConnected) return;
-            icon.src = `${entity.icon_url}?retry=${Date.now()}-${nextRetry}`;
-          }, nextRetry * 500);
-          return;
-        }
-        marker.remove();
-      });
-      marker.append(icon);
-      layer.append(marker);
-      icon.src = entity.icon_url;
-      if (icon.complete && icon.naturalWidth > 0) outlineIcon();
+      void this.appendEntityMarker(layer, entity, x, y, renderVersion);
     }
   }
+
+  private async appendEntityMarker(
+    layer: HTMLElement,
+    entity: MapNpcMarker,
+    x: number,
+    y: number,
+    renderVersion: number,
+  ): Promise<void> {
+    const source = await loadSprite(entity.icon_url || '');
+    if (!source || renderVersion !== this.entityRenderVersion) return;
+    const sprite = createOutlinedSprite(source, '#ffffff');
+    if (!sprite) return;
+    const marker = document.createElement('div');
+    marker.className = `entity-marker${entity.boss ? ' boss' : ''}`;
+    marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
+    marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
+    marker.title = entity.name || (entity.boss ? 'Босс' : 'NPC');
+    sprite.className = 'entity-head-sprite';
+    marker.append(sprite);
+    layer.append(marker);
+  }
+
   drawDroppedCoins(coins: MapCoinMarker[]) {
     const layer = this.layer('coins');
     layer.replaceChildren();
-    const coinClasses = { 71: 'copper', 72: 'silver', 73: 'gold', 74: 'platinum' };
+    const renderVersion = ++this.coinRenderVersion;
     for (const coin of coins || []) {
       const x = Number(coin.x),
         y = Number(coin.y),
@@ -286,35 +208,72 @@ export class MapEntityLayer {
         y >= this.world.height
       )
         continue;
-      const name =
-        coin.name ||
-        {
-          71: 'Медная монета',
-          72: 'Серебряная монета',
-          73: 'Золотая монета',
-          74: 'Платиновая монета',
-        }[Number(coin.type)] ||
-        'Монета';
-      const marker = document.createElement('div');
-      marker.className = 'coin-marker';
-      marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
-      marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
-      marker.title = `${name} × ${stack.toLocaleString('ru-RU')}`;
-      const icon = document.createElement('img');
-      icon.src = coin.icon_url || '';
-      icon.alt = '';
-      icon.draggable = false;
-      icon.addEventListener('error', () => {
-        const fallback = document.createElement('span');
-        fallback.className = `coin-fallback ${coinClasses[Number(coin.type)] || 'copper'}`;
-        marker.replaceChild(fallback, icon);
-      });
-      const amount = document.createElement('span');
-      amount.className = 'coin-stack';
-      amount.textContent = stack.toLocaleString('ru-RU');
-      marker.append(icon, amount);
-      layer.append(marker);
+      void this.appendCoinMarker(layer, coin, x, y, stack, renderVersion);
     }
+  }
+
+  private async appendCoinMarker(
+    layer: HTMLElement,
+    coin: MapCoinMarker,
+    x: number,
+    y: number,
+    stack: number,
+    renderVersion: number,
+  ): Promise<void> {
+    const source = await loadSprite(coin.icon_url || '');
+    if (!source || renderVersion !== this.coinRenderVersion) return;
+    const sprite = createOutlinedSprite(source, '#ffffff');
+    if (!sprite) return;
+
+    const marker = document.createElement('div');
+    marker.className = 'coin-marker';
+    marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
+    marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
+    marker.title = `${coin.name || 'Монета'} × ${stack.toLocaleString('ru-RU')}`;
+    sprite.className = 'coin-sprite';
+    marker.append(sprite);
+    layer.append(marker);
+  }
+
+  drawDeaths(deaths: MapDeathMarker[]) {
+    const layer = this.layer('deaths');
+    layer.replaceChildren();
+    const renderVersion = ++this.deathRenderVersion;
+    for (const death of deaths || []) {
+      const x = Number(death.x);
+      const y = Number(death.y);
+      if (
+        !Number.isFinite(x) ||
+        !Number.isFinite(y) ||
+        x < 0 ||
+        y < 0 ||
+        x >= this.world.width ||
+        y >= this.world.height
+      )
+        continue;
+      void this.appendDeathMarker(layer, death, x, y, renderVersion);
+    }
+  }
+
+  private async appendDeathMarker(
+    layer: HTMLElement,
+    death: MapDeathMarker,
+    x: number,
+    y: number,
+    renderVersion: number,
+  ): Promise<void> {
+    const source = await loadSprite(DEATH_SPRITE);
+    if (!source || renderVersion !== this.deathRenderVersion) return;
+
+    const marker = document.createElement('div');
+    marker.className = 'death-marker';
+    marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
+    marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
+    marker.title = `Место смерти: ${death.name || 'Игрок'}`;
+    const sprite = source.cloneNode(false) as HTMLImageElement;
+    sprite.className = 'death-sprite';
+    marker.append(sprite);
+    layer.append(marker);
   }
 
   // Exact vanilla Terraria pylon map-icon sprites (white outline included), from terraria.wiki.gg/wiki/Category:Pylon_map_icons.
@@ -348,6 +307,7 @@ export class MapEntityLayer {
   drawPylons(pylons: MapPylonMarker[]) {
     const layer = this.layer('pylons');
     layer.querySelectorAll('.pylon-marker').forEach((marker) => marker.remove());
+    const renderVersion = ++this.pylonRenderVersion;
     for (const pylon of pylons || []) {
       const x = Number(pylon.x),
         y = Number(pylon.y);
@@ -362,21 +322,35 @@ export class MapEntityLayer {
         continue;
       const type = String(pylon.type || '');
       const [label, , sprite] = PYLON_TYPES[type] || [`${type || 'Пилон'}`, '#d9e7f4', 'Forest'];
-      const marker = document.createElement('div');
-      marker.className = 'pylon-marker';
-      marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
-      marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
-      marker.setAttribute('aria-label', label);
-      const icon = document.createElement('img');
-      icon.className = 'pylon-icon';
-      icon.src = this.pylonSpriteData[sprite] || this.pylonSpriteData.Forest;
-      icon.alt = '';
-      icon.width = 28;
-      icon.height = 38;
-      icon.draggable = false;
-      marker.append(icon);
-      layer.append(marker);
+      void this.appendPylonMarker(layer, x, y, label, sprite, renderVersion);
     }
+  }
+
+  private async appendPylonMarker(
+    layer: HTMLElement,
+    x: number,
+    y: number,
+    label: string,
+    spriteName: string,
+    renderVersion: number,
+  ): Promise<void> {
+    const source = await loadSprite(
+      this.pylonSpriteData[spriteName] || this.pylonSpriteData.Forest,
+    );
+    if (!source || renderVersion !== this.pylonRenderVersion) return;
+    const marker = document.createElement('div');
+    marker.className = 'pylon-marker';
+    marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
+    marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
+    marker.setAttribute('aria-label', label);
+    const icon = source.cloneNode() as HTMLImageElement;
+    icon.className = 'pylon-icon';
+    icon.alt = '';
+    icon.width = 28;
+    icon.height = 38;
+    icon.draggable = false;
+    marker.append(icon);
+    layer.append(marker);
   }
   drawSpawn(world: MapEntityWorld) {
     const layer = this.layer('pylons'),
@@ -401,14 +375,27 @@ export class MapEntityLayer {
       y >= height
     )
       return;
+    const renderVersion = ++this.spawnRenderVersion;
+    void this.appendSpawnMarker(layer, x, y, width, height, renderVersion);
+  }
+
+  private async appendSpawnMarker(
+    layer: HTMLElement,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    renderVersion: number,
+  ): Promise<void> {
+    const source = await loadSprite(this.spawnSpriteData);
+    if (!source || renderVersion !== this.spawnRenderVersion) return;
     const marker = document.createElement('div');
     marker.className = 'spawn-marker';
     marker.style.left = `${((x + 0.5) / width) * 100}%`;
     marker.style.top = `${((y + 0.5) / height) * 100}%`;
     marker.setAttribute('aria-label', 'Точка появления');
-    const icon = document.createElement('img');
+    const icon = source.cloneNode() as HTMLImageElement;
     icon.className = 'spawn-icon';
-    icon.src = this.spawnSpriteData;
     icon.alt = '';
     icon.width = 22;
     icon.height = 24;

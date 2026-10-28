@@ -29,6 +29,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private readonly ConcurrentDictionary<int, string> _clientUuids = new();
     private readonly System.Collections.Generic.Dictionary<int, PlayerSession> _sessions = new();
     private readonly ConcurrentDictionary<int, byte> _teleportedSlots = new();
+    private readonly System.Collections.Generic.HashSet<int> _deadPlayerSlots = new();
+    private readonly System.Collections.Generic.List<PendingPlayerDeath> _pendingPlayerDeaths = new();
     private TelemetryStreamServer? _telemetryStream;
     private MapTileNameCatalog? _mapTileNames;
     private MapTileDataCapture? _mapTileData;
@@ -68,6 +70,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         _clientUuids.Clear();
         _teleportedSlots.Clear();
         _sessions.Clear();
+        _deadPlayerSlots.Clear();
+        _pendingPlayerDeaths.Clear();
         _mapScanner = null;
         _mapTileNames = null;
         _mapTileData = null;
@@ -136,6 +140,23 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 continue;
 
             activeSlots.Add(slot);
+            if (player.dead)
+            {
+                if (_deadPlayerSlots.Add(slot))
+                {
+                    _pendingPlayerDeaths.Add(new PendingPlayerDeath(
+                        name,
+                        ReadClientUuid(slot),
+                        (int)Math.Floor(player.Center.X / 16.0),
+                        (int)Math.Floor(player.Center.Y / 16.0),
+                        DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                    ));
+                }
+            }
+            else
+            {
+                _deadPlayerSlots.Remove(slot);
+            }
             if (!_sessions.TryGetValue(slot, out var session) || !string.Equals(session.Name, name, StringComparison.Ordinal))
                 _sessions[slot] = new PlayerSession(name, ReadClientUuid(slot), DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             else if (ReadClientUuid(slot) is { } uuid && !string.Equals(session.Uuid, uuid, StringComparison.Ordinal))
@@ -145,6 +166,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         foreach (var slot in _sessions.Keys.Where(slot => !activeSlots.Contains(slot)).ToArray())
         {
             _sessions.Remove(slot);
+            _deadPlayerSlots.Remove(slot);
             _clientUuids.TryRemove(slot, out _);
             _teleportedSlots.TryRemove(slot, out _);
         }
@@ -154,6 +176,17 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     {
         var calamityProgress = BossProgressSnapshotReader.ReadCalamityBossProgress();
         var bossDefeatCounts = BossVictoryTracker.SnapshotCounts();
+        var playerDeaths = _pendingPlayerDeaths
+            .Select(death => new
+            {
+                name = death.Name,
+                uuid = death.Uuid,
+                x = death.TileX,
+                y = death.TileY,
+                at = death.Timestamp
+            })
+            .ToArray();
+        _pendingPlayerDeaths.Clear();
         var players = _sessions
             .OrderBy(pair => pair.Key)
             .Select(pair => new
@@ -256,6 +289,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 online = players.Length,
                 list = players
             },
+            playerDeaths,
             mapScan = _mapScanner?.GetStatus(),
             baseMapCaptures = _mapScanner?.DrainCaptures() ?? Array.Empty<object>()
         };
@@ -353,4 +387,5 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     };
 
     private sealed record PlayerSession(string Name, string? Uuid, long JoinedAtUnix);
+    private sealed record PendingPlayerDeath(string Name, string? Uuid, int TileX, int TileY, long Timestamp);
 }

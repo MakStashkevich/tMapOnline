@@ -10,7 +10,8 @@ terraria-world-viewer/
 │   ├── sprite_renderer/ # Python XNB/LZX reader and cached image renderers
 │   ├── web/
 │   │   ├── src/       # TypeScript, SCSS и разделённые frontend modules
-│   │   ├── assets/    # собранные минифицированные JS/CSS, раздаваемые сервером
+│   │   ├── assets/    # собранные JS/CSS и скопированные статические спрайты
+│   │   ├── static/    # исходные изображения интерфейса, копируются при сборке
 │   │   └── world-map/ # HTML entry point
 │   ├── sprite_renderer/
 │   ├── config.py      # YAML schema/defaults/feature flags
@@ -26,6 +27,8 @@ terraria-world-viewer/
 ### Рендер спрайтов
 
 `sprite_renderer/xnb_texture.py` проверяет заголовки XNB и читает их `Texture2D` RGBA-данные. Сжатые XNB разворачиваются через `sprite_renderer/lzx.py`, включая 32-КБ кадры; внешний LZX-пакет и Java runtime не нужны. `PlayerSpriteRenderer`, `NpcSpriteRenderer` и `MapItemSpriteRenderer` отвечают за композицию аватаров, портретов NPC/боссов и иконок предметов. Pillow используется только как лёгкая граница чтения/записи PNG; кэширование и HTTP-адреса изображений остаются у `StatusStore`. Мод tModLoader остаётся на C#.
+
+Для соответствия игровым маркерам сверяемся с локальной декомпиляцией установленной сборки tModLoader в `/Volumes/T7/CodeProjects/Личное/_python/terraria-decompiled/tmodloader`. Крест смерти берётся из штатного `Content/Images/MapDeath.xnb`; код `Main.DrawPlayerDeathMarker` рисует его напрямую по `Player.lastDeathPostion` с центрированием и масштабом карты. Поэтому Viewer использует этот спрайт без дополнительной тени или искусственной обводки. Происхождение и команда обновления декомпиляции записаны в README рядом с ней; `terrex` к этой reference-копии не относится.
 
 ### tModLoader: композиция и сервисы
 

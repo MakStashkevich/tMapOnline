@@ -1,4 +1,4 @@
-import { readdir, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, readdir, mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -7,10 +7,13 @@ import * as sass from 'sass';
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = join(projectRoot, 'terraria_viewer', 'web', 'src');
 const assetRoot = join(projectRoot, 'terraria_viewer', 'web', 'assets');
+const staticRoot = join(projectRoot, 'terraria_viewer', 'web', 'static');
 const styleRoot = join(sourceRoot, 'styles', 'entries');
 
 await rm(assetRoot, { recursive: true, force: true });
 await mkdir(assetRoot, { recursive: true });
+// Keep native image assets alongside the bundled files without embedding or re-encoding them.
+await cp(staticRoot, assetRoot, { recursive: true });
 
 await build({
   entryPoints: {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...models import LiveTelemetrySnapshot, NpcEntity
+from ...models import LiveTelemetrySnapshot, NpcEntity, PlayerDeath
 
 from ..store_common import (
     Any,
@@ -59,6 +59,8 @@ class LiveTelemetryMixin(StoreMixinContract):
             self._active_coins_world_id = str(world_id) if world_id is not None else None
         players = [player for player in telemetry.players if is_valid_player_name(player.name)]
         self.set_players_online(len(players), players, world=world)
+        if telemetry.player_deaths:
+            self._save_player_death_locations(telemetry.player_deaths, world)
         pylons = [pylon.to_payload() for pylon in telemetry.pylons]
         if telemetry.has_pylon_snapshot:
             with self._lock:
@@ -151,6 +153,49 @@ class LiveTelemetryMixin(StoreMixinContract):
         )
         with self._lock:
             self._telemetry_received_at = time.time()
+
+    def _save_player_death_locations(
+        self, deaths: tuple[PlayerDeath, ...], world: dict[str, Any]
+    ) -> None:
+        """Persist a bounded per-player death history for map markers."""
+        world_id = world.get("id", world.get("world_id"))
+        world_name = str(world.get("name") or world.get("world_name") or "")
+        width = int(world.get("width") or 0)
+        height = int(world.get("height") or 0)
+        with self._lock:
+            for death in deaths:
+                player_id = (
+                    f"uuid:{death.uuid.casefold()}" if death.uuid
+                    else f"name:{death.name.casefold()}"
+                )
+                record = self._players.get(player_id)
+                if record is None:
+                    record = next(
+                        (item for item in self._players.values()
+                         if str(item.get("name", "")).casefold() == death.name.casefold()),
+                        None,
+                    )
+                if record is None or death.tile_x >= width or death.tile_y >= height:
+                    continue
+
+                locations = cast(
+                    list[dict[str, Any]], record.setdefault("death_locations", [])
+                )
+                if any(
+                    item.get("world_id") == world_id
+                    and item.get("timestamp") == death.timestamp
+                    for item in locations
+                ):
+                    continue
+                locations.append({
+                    "world_id": world_id,
+                    "world_name": world_name,
+                    "x": death.tile_x,
+                    "y": death.tile_y,
+                    "timestamp": death.timestamp,
+                })
+                del locations[:-100]
+            self._save_players_locked()
 
     def _write_map_coin_sprite(self, item_type: int) -> str | None:
         """Cache the native in-game sprite for a dropped vanilla coin pile."""

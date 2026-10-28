@@ -155,6 +155,18 @@ export class MapTooltipController {
     const isNear = (objectX: number, objectY: number, radius: number): boolean =>
       Math.abs(x - objectX) * scale <= radius && Math.abs(y - objectY) * scale <= radius;
 
+    for (const death of data.deaths || []) {
+      const deathX = Number(death.x) + 0.5;
+      const deathY = Number(death.y) + 0.5;
+      if (isNear(deathX, deathY, 18)) {
+        return {
+          key: `death:${death.id}`,
+          title: `Место смерти: ${death.name || 'Игрок'}`,
+          description: `Плитка ${Math.floor(deathX)}, ${Math.floor(deathY)}`,
+        };
+      }
+    }
+
     for (const coin of data.coins || []) {
       const coinX = Number(coin.x) + 0.5;
       const coinY = Number(coin.y) + 0.5;

@@ -16,6 +16,12 @@
 - Give public collaborators narrow constructor dependencies and explicit methods. Keep DOM access out of data services and keep HTTP/socket/file effects out of presentation objects where practical.
 - Handle failures at the boundary that can recover or report them. Do not turn a failed read into valid-looking empty world data.
 
+## Terraria source reference
+
+- The canonical local decompilation of the installed tModLoader assembly lives at `/Volumes/T7/CodeProjects/Личное/_python/terraria-decompiled/tmodloader`.
+- Before implementing or changing behavior intended to match Terraria, inspect the relevant decompiled game code and assets there. This is the maintained reference for map rendering, sprites, players, NPCs, items, and gameplay events; do not use the separate `terrex` project as a substitute.
+- The decompilation was generated from the installed `tModLoader.dll` at `/Volumes/T7/Extender/Users/makstashkevich/Library/Application Support/Steam/steamapps/common/tModLoader/tModLoader.dll`. Re-run ILSpy into the canonical directory when the installed game assembly changes; keep only this one local decompilation instead of copies under temporary folders.
+
 ## Before completion
 
 - Trace callers and the matching consumer before changing a protocol or persisted representation.

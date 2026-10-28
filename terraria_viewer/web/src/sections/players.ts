@@ -1,4 +1,10 @@
 import type { PlayerRecord } from '../core/viewer-types';
+import {
+  createOutlinedSprite,
+  defaultPlayerSprite,
+  loadSprite,
+  playerOutlineColor,
+} from '../core/sprite-renderer';
 
 type PlayersPayload = {
   online?: { count?: number; ids?: string[] };
@@ -37,13 +43,11 @@ export async function mount(root: HTMLElement): Promise<void> {
     card.className = 'viewer-card';
     const header = document.createElement('div');
     header.className = 'viewer-card-head';
-    if (player.avatar_url) {
-      const image = document.createElement('img');
-      image.src = player.avatar_url;
-      image.alt = '';
-      image.loading = 'lazy';
-      header.append(image);
-    }
+    const avatar = document.createElement('span');
+    avatar.className = 'player-card-avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    header.append(avatar);
+    void renderPlayerAvatar(avatar, player.avatar_url, online.has(player.id) ? player.team : null);
     const title = document.createElement('h3');
     title.textContent = player.name || 'Игрок';
     header.append(title);
@@ -85,4 +89,17 @@ export async function mount(root: HTMLElement): Promise<void> {
     list.append(empty);
   }
   root.append(list);
+}
+
+async function renderPlayerAvatar(
+  container: HTMLElement,
+  avatarUrl: string | undefined,
+  team: number | null | undefined,
+): Promise<void> {
+  const source = (await loadSprite(avatarUrl || '')) || (await loadSprite(defaultPlayerSprite()));
+  if (!source || !container.isConnected) return;
+  const outlinedSprite = createOutlinedSprite(source, playerOutlineColor(team));
+  if (!outlinedSprite) return;
+  outlinedSprite.className = 'player-card-avatar-sprite';
+  container.replaceChildren(outlinedSprite);
 }

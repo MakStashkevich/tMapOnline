@@ -14,13 +14,20 @@
   align-items: center;
   gap: 11px;
 }
-.viewer-card-head img {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  object-fit: cover;
+.player-card-avatar {
+  display: grid;
+  flex: 0 0 52px;
+  width: 52px;
+  height: 64px;
+  place-items: center;
+}
+.player-card-avatar-sprite {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
   image-rendering: pixelated;
-  background: var(--shell-hover);
 }
 .viewer-card h3 {
   flex: 1;

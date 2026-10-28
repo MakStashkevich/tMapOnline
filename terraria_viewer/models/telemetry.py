@@ -210,6 +210,34 @@ class DroppedCoin:
 
 
 @dataclass(frozen=True)
+class PlayerDeath:
+    """A player death location reported by the game telemetry hook."""
+
+    name: str
+    uuid: str | None
+    tile_x: int
+    tile_y: int
+    timestamp: float
+
+    @classmethod
+    def from_payload(cls, value: Any) -> PlayerDeath | None:
+        raw = _object(value)
+        name = str(raw.get("name") or "").strip()
+        tile_x = _integer(raw.get("x"))
+        tile_y = _integer(raw.get("y"))
+        if not name or tile_x is None or tile_y is None or tile_x < 0 or tile_y < 0:
+            return None
+        uuid_value = raw.get("uuid")
+        return cls(
+            name=name[:64],
+            uuid=str(uuid_value) if uuid_value else None,
+            tile_x=tile_x,
+            tile_y=tile_y,
+            timestamp=_number(raw.get("at")) or 0,
+        )
+
+
+@dataclass(frozen=True)
 class Pylon:
     """A placed pylon with its world tile coordinate."""
 
@@ -239,6 +267,7 @@ class LiveTelemetrySnapshot:
     players: tuple[PlayerSnapshot, ...]
     npcs: tuple[NpcEntity, ...]
     coins: tuple[DroppedCoin, ...]
+    player_deaths: tuple[PlayerDeath, ...]
     pylons: tuple[Pylon, ...]
     has_pylon_snapshot: bool
     base_map_captures: tuple[dict[str, Any], ...]
@@ -266,6 +295,10 @@ class LiveTelemetrySnapshot:
             coins=tuple(
                 coin for item in _json_array(world.get("droppedCoins"))
                 if (coin := DroppedCoin.from_payload(item)) is not None
+            ),
+            player_deaths=tuple(
+                death for item in _json_array(root.get("playerDeaths"))
+                if (death := PlayerDeath.from_payload(item)) is not None
             ),
             pylons=tuple(
                 pylon for item in _json_array(root.get("pylons"))

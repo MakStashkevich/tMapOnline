@@ -65,18 +65,17 @@
   border-top: 3px solid var(--route-color);
   border-radius: 5px;
 }
-.player-toggle img,
-.avatar-fallback {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  object-fit: cover;
-  image-rendering: pixelated;
-  background: #263544;
-}
-.avatar-fallback {
+.player-toggle-avatar {
   display: grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 34px;
   place-items: center;
-  font-weight: 700;
-  color: #d2e2ef;
+}
+.player-toggle-avatar-sprite {
+  display: block;
+  width: auto;
+  height: 32px;
+  max-width: 25px;
+  image-rendering: pixelated;
 }

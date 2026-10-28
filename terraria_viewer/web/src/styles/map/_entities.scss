@@ -34,52 +34,29 @@
 }
 .coin-marker {
   position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  transform: translate(-50%, -50%);
-  min-width: 18px;
-  filter: drop-shadow(0 1px 1px #000);
-}
-.coin-marker img {
   display: block;
-  width: 18px;
-  height: 18px;
-  object-fit: contain;
+  transform: translate(-50%, -50%);
+}
+.coin-marker .coin-sprite {
+  display: block;
+  width: auto;
+  height: auto;
   image-rendering: pixelated;
 }
-.coin-stack {
-  margin-top: -2px;
-  color: #fff;
-  font:
-    700 9px/1 Arial,
-    sans-serif;
-  text-shadow:
-    0 1px 2px #000,
-    1px 0 #000,
-    -1px 0 #000,
-    0 -1px #000;
-  white-space: nowrap;
+.death-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
 }
-.coin-fallback {
-  width: 10px;
-  height: 10px;
-  margin: 4px;
-  border: 1px solid #fff9;
-  border-radius: 50%;
-  box-shadow:
-    inset 1px 1px #fff7,
-    inset -1px -1px #0008;
+.death-marker {
+  position: absolute;
+  display: block;
+  transform: translate(-50%, -50%);
 }
-.coin-fallback.copper {
-  background: #b66a36;
-}
-.coin-fallback.silver {
-  background: #bdc6ce;
-}
-.coin-fallback.gold {
-  background: #f2c64c;
-}
-.coin-fallback.platinum {
-  background: #a9e4ed;
+.death-sprite {
+  display: block;
+  width: auto;
+  height: auto;
+  image-rendering: pixelated;
 }

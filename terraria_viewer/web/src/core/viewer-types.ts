@@ -16,6 +16,7 @@ export type PlayerRecord = {
   last_seen_at?: number;
   total_seconds?: number;
   avatar_url?: string;
+  team?: number | null;
   deaths?: number;
   pvp_deaths?: number;
   sessions?: PlayerSession[];

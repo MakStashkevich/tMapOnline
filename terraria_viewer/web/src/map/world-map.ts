@@ -87,6 +87,7 @@ const modules = await activateModules('world_map');
     markerKey = '',
     entityRenderKey = '',
     coinRenderKey = '',
+    deathRenderKey = '',
     pylonRenderKey = '',
     spawnRenderKey = '',
     toggleKey = '',
@@ -470,6 +471,9 @@ const modules = await activateModules('world_map');
       maskPlayersKey = '';
       routeKey = '';
       markerKey = '';
+      entityRenderKey = '';
+      coinRenderKey = '';
+      deathRenderKey = '';
       pylonRenderKey = '';
       spawnRenderKey = '';
       canvasWorld = worldKey;
@@ -609,6 +613,13 @@ const modules = await activateModules('world_map');
     if (coinKey !== coinRenderKey) {
       mapEntityLayer.drawDroppedCoins(modules['world_map.coins'] ? data.coins : []);
       coinRenderKey = coinKey;
+    }
+    const deathKey = modules['world_map.players']
+      ? JSON.stringify([data.world?.id, data.deaths || []])
+      : 'off';
+    if (deathKey !== deathRenderKey) {
+      mapEntityLayer.drawDeaths(modules['world_map.players'] ? data.deaths : []);
+      deathRenderKey = deathKey;
     }
     if (modules['world_map.spawn']) {
       mapEntityLayer.setWorld(data.world);

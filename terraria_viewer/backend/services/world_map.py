@@ -81,6 +81,7 @@ class WorldMapMixin(StoreMixinContract):
             requested = str(world_id if world_id not in (None, "") else active_id or "")
             active_name = str(self._server_info.get("world") or "")
             players = []
+            death_markers = []
             online_player_ids = set(self._online_player_ids)
             telemetry_age = None if self._telemetry_received_at is None else max(0, time.time() - self._telemetry_received_at)
             active_npcs = []
@@ -120,6 +121,21 @@ class WorldMapMixin(StoreMixinContract):
                 except (TypeError, ValueError):
                     pass
             for player_id, record in self._players.items():
+                for death in record.get("death_locations", []):
+                    if not isinstance(death, dict):
+                        continue
+                    death_world_id = str(death.get("world_id") or "")
+                    death_world_name = str(death.get("world_name") or "")
+                    if requested and requested not in {death_world_id, death_world_name}:
+                        continue
+                    death_markers.append({
+                        "id": f"{player_id}:{death.get('timestamp', 0)}",
+                        "player_id": player_id,
+                        "name": record.get("name"),
+                        "x": death.get("x"),
+                        "y": death.get("y"),
+                        "timestamp": death.get("timestamp"),
+                    })
                 movement = self._load_movement(player_id)
                 for key, world in as_json_object(movement.get("worlds")).items():
                     stored_id = world.get("world_id")
@@ -218,6 +234,7 @@ class WorldMapMixin(StoreMixinContract):
                     if since <= 0 or float(base_chunk_times.get(key, 0)) > since
                 ],
                 "players": players,
+                "deaths": death_markers,
                 "active_npcs": active_npcs,
                 "coins": active_coins,
                 "pylons": pylons,
