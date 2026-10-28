@@ -38,7 +38,7 @@ class ViewerRouteTests(unittest.TestCase):
             ("/healthz", b"ok"),
             ("/api/site-config", b"world_map.coins"),
             ("/world-map", b"/assets/world-map.css"),
-            ("/world-map/debug", b"/assets/world-map.js"),
+            ("/debug", b"/assets/world-map.js"),
             ("/assets/app-shell.js", "Карта мира".encode("utf-8")),
             ("/assets/world-map.js", b"world_map.debug"),
         ]
@@ -53,8 +53,11 @@ class ViewerRouteTests(unittest.TestCase):
         self.server = start_dashboard(self.store, 0, {"pages": {"world_map": {"enabled": False}}}, "127.0.0.1")
         self.base = "http://127.0.0.1:%s" % self.server.server_port
         with self.assertRaises(HTTPError) as error:
-            urlopen(self.base + "/world-map/debug", timeout=3)
+            urlopen(self.base + "/debug", timeout=3)
         self.assertEqual(error.exception.code, 404)
+        with self.assertRaises(HTTPError) as legacy_error:
+            urlopen(self.base + "/world-map/debug", timeout=3)
+        self.assertEqual(legacy_error.exception.code, 404)
 
     def test_wiki_cache_serves_cached_boss_image(self) -> None:
         image_url = "https://terraria.wiki.gg/images/King_Slime.gif?1becd1"

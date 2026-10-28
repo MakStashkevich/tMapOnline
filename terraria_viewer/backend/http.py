@@ -184,7 +184,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(502, str(error).encode("utf-8"), "text/plain; charset=utf-8", cache_control="no-store")
                 return
             self._send(200, body, content_type, cache_control=f"public, max-age={max_age}")
-        elif path in {"/world-map", "/world-map.html", "/world-map/debug", "/debug"}:
+        elif path in {"/world-map", "/world-map.html", "/debug"}:
             if not page_enabled({"site": self.site_config}, "world_map"):
                 self._send(404, b"page disabled\n", "text/plain; charset=utf-8")
                 return
@@ -254,7 +254,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         referer_value = self.headers.get("Referer", "")
         if referer_value:
             referer = urlsplit(referer_value)
-            allowed_source = referer.path.rstrip("/") in {"/debug", "/world-map/debug"}
+            allowed_source = referer.path.rstrip("/") == "/debug"
         else:
             # Nginx deliberately sends Referrer-Policy: no-referrer. Safari
             # therefore omits Referer even for this same-origin debug-page POST.

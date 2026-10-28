@@ -19,8 +19,7 @@ const modules = await activateModules('world_map');
   const $ = (id: string): any => document.getElementById(id);
   // The explicit debug URL is the access switch for diagnostics and map import tools.
   // Keep these controls absent from the regular map, regardless of module defaults.
-  const debugMode =
-    /^\/debug\/?$/.test(location.pathname) || /^\/world-map\/debug\/?$/.test(location.pathname);
+  const debugMode = /^\/debug\/?$/.test(location.pathname);
   if (debugMode) {
     document
       .querySelector('.zoom-tools')
