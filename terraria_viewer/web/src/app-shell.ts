@@ -4,161 +4,226 @@ import { renderIcons, setIcon } from './core/icons';
 type ViewConfig = { title: string; description: string };
 type SiteConfig = { sections?: Partial<Record<SectionView, boolean>> };
 
-const views: Record<View, ViewConfig> = {
-  map: { title: 'Карта мира', description: 'Карта исследования и текущее состояние мира.' },
-  world: { title: 'Данные карты', description: 'Исследование мира, сканирование и объекты карты.' },
-  players: { title: 'Игроки', description: 'Онлайн, история игроков и игровые сессии.' },
-  bosses: { title: 'Боссы и прогресс', description: 'Активные боссы, победы и прогресс мира.' },
-  server: { title: 'Сервер', description: 'Состояние Terraria, туннеля и соединения.' },
-  activity: {
-    title: 'Нагрузка и события',
-    description: 'Ресурсы компьютера, доступность и журнал событий.',
-  },
-};
+class ViewerApplication {
+  private readonly views: Record<View, ViewConfig> = {
+    map: { title: 'Карта мира', description: 'Карта исследования и текущее состояние мира.' },
+    world: {
+      title: 'Данные карты',
+      description: 'Исследование мира, сканирование и объекты карты.',
+    },
+    players: { title: 'Игроки', description: 'Онлайн, история игроков и игровые сессии.' },
+    bosses: { title: 'Боссы и прогресс', description: 'Активные боссы, победы и прогресс мира.' },
+    server: { title: 'Сервер', description: 'Состояние Terraria, туннеля и соединения.' },
+    activity: {
+      title: 'Нагрузка и события',
+      description: 'Ресурсы компьютера, доступность и журнал событий.',
+    },
+  };
 
-const sectionLoaders: Record<SectionView, () => Promise<SectionModule>> = {
-  world: () => import('./sections/world'),
-  players: () => import('./sections/players'),
-  bosses: () => import('./sections/bosses'),
-  server: () => import('./sections/server'),
-  activity: () => import('./sections/activity'),
-};
-const sectionModules = new Map<SectionView, SectionModule>();
-const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
-renderIcons();
-let currentView: View = 'map';
-let sectionRequest = 0;
+  private readonly sectionLoaders: Record<SectionView, () => Promise<SectionModule>> = {
+    world: () => import('./sections/world'),
+    players: () => import('./sections/players'),
+    bosses: () => import('./sections/bosses'),
+    server: () => import('./sections/server'),
+    activity: () => import('./sections/activity'),
+  };
 
-const setDrawer = (open: boolean): void => {
-  const drawer = $('map-sidebar');
-  const backdrop = $('sidebar-backdrop');
-  const button = $('sidebar-toggle');
-  document.body.classList.toggle('drawer-open', open);
-  drawer.inert = !open;
-  drawer.setAttribute('aria-hidden', String(!open));
-  button.setAttribute('aria-expanded', String(open));
-  backdrop.hidden = !open;
-};
+  private readonly sectionModules = new Map<SectionView, SectionModule>();
+  private currentView: View = 'map';
+  private sectionRequest = 0;
 
-const loadSectionStyle = async (name: SectionView): Promise<void> => {
-  const existing = document.querySelector<HTMLLinkElement>(`link[data-section-style="${name}"]`);
-  if (existing) return;
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = `/assets/sections/${name}.css`;
-  link.dataset.sectionStyle = name;
-  document.head.append(link);
-  await new Promise<void>((resolve, reject) => {
-    link.onload = () => resolve();
-    link.onerror = () => {
-      link.remove();
-      reject(new Error('Не удалось загрузить стили раздела'));
-    };
-  });
-};
+  private element<T extends HTMLElement = HTMLElement>(id: string): T {
+    const element = document.getElementById(id);
+    if (!element) throw new Error(`Required page element is missing: #${id}`);
+    return element as T;
+  }
 
-const openView = async (view: View): Promise<void> => {
-  currentView = view;
-  setDrawer(false);
-  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((item) => {
-    const active = item.dataset.view === view;
-    item.classList.toggle('active', active);
-    item.setAttribute('aria-current', active ? 'page' : 'false');
-  });
+  start(): void {
+    renderIcons();
+    this.applySavedTheme();
+    this.bindNavigation();
+    this.loadEnabledSections();
+    void this.openView(this.currentView);
+  }
 
-  const isMap = view === 'map';
-  $('map-pane').hidden = !isMap;
-  $('section-pane').hidden = isMap;
-  document.body.classList.toggle('section-view', !isMap);
-  window.dispatchEvent(
-    new CustomEvent<{ view: View }>('terraria:view-change', { detail: { view } }),
-  );
-  if (isMap) return;
-
-  const viewConfig = views[view];
-  $('section-title').textContent = viewConfig.title;
-  $('section-description').textContent = viewConfig.description;
-  const content = $('section-content');
-  const requestId = ++sectionRequest;
-  const loading = document.createElement('div');
-  loading.className = 'section-loading';
-  loading.textContent = 'Загружаю данные…';
-  content.replaceChildren(loading);
-
-  try {
-    await loadSectionStyle(view);
-    let section = sectionModules.get(view);
-    if (!section) {
-      section = await sectionLoaders[view]();
-      sectionModules.set(view, section);
+  private applySavedTheme(): void {
+    let savedTheme: string | null = null;
+    try {
+      savedTheme = localStorage.getItem('terraria-viewer-theme');
+    } catch {
+      // Storage may be disabled; the page still works with its default theme.
     }
-    if (requestId === sectionRequest) await section.mount(content);
-  } catch (error) {
-    if (requestId !== sectionRequest) return;
-    content.replaceChildren();
+    this.applyTheme(savedTheme);
+  }
+
+  private applyTheme(theme: string | null): void {
+    const selectedTheme = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = selectedTheme;
+
+    try {
+      localStorage.setItem('terraria-viewer-theme', selectedTheme);
+    } catch {
+      // Keep the selected theme for this page load even when persistence is unavailable.
+    }
+
+    const themeButton = this.element('theme-toggle');
+    setIcon(themeButton, selectedTheme === 'dark' ? 'Sun' : 'Moon');
+    themeButton.setAttribute(
+      'aria-label',
+      selectedTheme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему',
+    );
+  }
+
+  private bindNavigation(): void {
+    this.element('theme-toggle').addEventListener('click', () => {
+      const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      this.applyTheme(nextTheme);
+    });
+    this.element('sidebar-toggle').addEventListener('click', () => {
+      this.setDrawer(!document.body.classList.contains('drawer-open'));
+    });
+    this.element('section-menu-toggle').addEventListener('click', () => this.setDrawer(true));
+    this.element('sidebar-close').addEventListener('click', () => this.setDrawer(false));
+    this.element('sidebar-backdrop').addEventListener('click', () => this.setDrawer(false));
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && document.body.classList.contains('drawer-open')) {
+        this.setDrawer(false);
+      }
+    });
+
+    document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const view = button.dataset.view as View;
+        if (view in this.views) void this.openView(view);
+      });
+    });
+  }
+
+  private setDrawer(open: boolean): void {
+    const drawer = this.element('map-sidebar');
+    const backdrop = this.element('sidebar-backdrop');
+    const toggleButton = this.element('sidebar-toggle');
+
+    document.body.classList.toggle('drawer-open', open);
+    drawer.inert = !open;
+    drawer.setAttribute('aria-hidden', String(!open));
+    toggleButton.setAttribute('aria-expanded', String(open));
+    backdrop.hidden = !open;
+  }
+
+  private async loadSectionStyle(section: SectionView): Promise<void> {
+    const existingStyle = document.querySelector<HTMLLinkElement>(
+      `link[data-section-style="${section}"]`,
+    );
+    if (existingStyle) return;
+
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = `/assets/sections/${section}.css`;
+    link.dataset.sectionStyle = section;
+    document.head.append(link);
+
+    await new Promise<void>((resolve, reject) => {
+      link.onload = () => resolve();
+      link.onerror = () => {
+        link.remove();
+        reject(new Error(`Could not load styles for the ${section} section`));
+      };
+    });
+  }
+
+  private async openView(view: View): Promise<void> {
+    this.currentView = view;
+    this.setDrawer(false);
+    this.updateNavigationState(view);
+    this.updatePageVisibility(view);
+    window.dispatchEvent(new CustomEvent('terraria:view-change', { detail: { view } }));
+
+    if (view === 'map') return;
+
+    this.showSectionLoading(view);
+    const requestId = ++this.sectionRequest;
+
+    try {
+      await this.loadSectionStyle(view);
+      const section = await this.loadSection(view);
+      if (requestId === this.sectionRequest) {
+        await section.mount(this.element('section-content'));
+      }
+    } catch (error) {
+      if (requestId === this.sectionRequest) this.showSectionError(view, error);
+    }
+  }
+
+  private updateNavigationState(view: View): void {
+    document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
+      const isActive = button.dataset.view === view;
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-current', isActive ? 'page' : 'false');
+    });
+  }
+
+  private updatePageVisibility(view: View): void {
+    const showingMap = view === 'map';
+    this.element('map-pane').hidden = !showingMap;
+    this.element('section-pane').hidden = showingMap;
+    document.body.classList.toggle('section-view', !showingMap);
+  }
+
+  private showSectionLoading(view: SectionView): void {
+    const viewConfig = this.views[view];
+    this.element('section-title').textContent = viewConfig.title;
+    this.element('section-description').textContent = viewConfig.description;
+
+    const loadingMessage = document.createElement('div');
+    loadingMessage.className = 'section-loading';
+    loadingMessage.textContent = 'Загружаю данные…';
+    this.element('section-content').replaceChildren(loadingMessage);
+  }
+
+  private async loadSection(view: SectionView): Promise<SectionModule> {
+    const cachedSection = this.sectionModules.get(view);
+    if (cachedSection) return cachedSection;
+
+    const loadedSection = await this.sectionLoaders[view]();
+    this.sectionModules.set(view, loadedSection);
+    return loadedSection;
+  }
+
+  private showSectionError(view: SectionView, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
     const panel = document.createElement('div');
     panel.className = 'section-error';
-    panel.textContent = `Не удалось загрузить раздел: ${error instanceof Error ? error.message : String(error)}`;
-    const retry = document.createElement('button');
-    retry.className = 'tool';
-    retry.innerHTML =
+    panel.textContent = `Не удалось загрузить раздел: ${message}`;
+
+    const retryButton = document.createElement('button');
+    retryButton.className = 'tool';
+    retryButton.innerHTML =
       '<i data-lucide="activity" class="ui-icon" aria-hidden="true"></i><span>Повторить</span>';
-    renderIcons(retry);
-    retry.addEventListener('click', () => void openView(view));
-    panel.append(retry);
-    content.append(panel);
-  }
-};
+    renderIcons(retryButton);
+    retryButton.addEventListener('click', () => void this.openView(view));
+    panel.append(retryButton);
 
-const applyTheme = (theme: string | null): void => {
-  const selected = theme === 'light' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = selected;
-  try {
-    localStorage.setItem('terraria-viewer-theme', selected);
-  } catch {
-    /* Storage can be disabled. */
+    this.element('section-content').replaceChildren(panel);
   }
-  setIcon($('theme-toggle'), selected === 'dark' ? 'Sun' : 'Moon');
-  $('theme-toggle').setAttribute(
-    'aria-label',
-    selected === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему',
-  );
-};
 
-try {
-  applyTheme(localStorage.getItem('terraria-viewer-theme'));
-} catch {
-  applyTheme('dark');
+  private async loadEnabledSections(): Promise<void> {
+    try {
+      const response = await fetch('/api/site-config', { cache: 'no-store' });
+      if (!response.ok) return;
+
+      const config = (await response.json()) as SiteConfig;
+      document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
+        const view = button.dataset.view;
+        if (view && view !== 'map' && config.sections?.[view as SectionView] === false) {
+          button.hidden = true;
+        }
+      });
+    } catch {
+      // Keep configured sections visible when the optional config endpoint is unavailable.
+    }
+  }
 }
-$('theme-toggle').addEventListener('click', () =>
-  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'),
-);
-$('sidebar-toggle').addEventListener('click', () =>
-  setDrawer(!document.body.classList.contains('drawer-open')),
-);
-$('section-menu-toggle').addEventListener('click', () => setDrawer(true));
-$('sidebar-close').addEventListener('click', () => setDrawer(false));
-$('sidebar-backdrop').addEventListener('click', () => setDrawer(false));
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && document.body.classList.contains('drawer-open')) setDrawer(false);
-});
-document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((item) => {
-  item.addEventListener('click', () => {
-    const view = item.dataset.view as View;
-    if (view in views) void openView(view);
-  });
-});
 
-fetch('/api/site-config', { cache: 'no-store' })
-  .then((response) => (response.ok ? (response.json() as Promise<SiteConfig>) : null))
-  .then((config) => {
-    if (!config) return;
-    document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((item) => {
-      const view = item.dataset.view;
-      if (view && view !== 'map' && config.sections?.[view as SectionView] === false)
-        item.hidden = true;
-    });
-  })
-  .catch(() => undefined);
-
-void openView(currentView);
+new ViewerApplication().start();
