@@ -48,18 +48,11 @@ type MapPylonMarker = { x: number; y: number; type?: string };
 export class MapEntityLayer {
   private world: MapEntityWorld = {};
   private spawnRenderKey = '';
-  private headScale = 1;
 
   constructor(private readonly root: HTMLElement) {}
 
   setWorld(world: MapEntityWorld): void {
     this.world = world;
-  }
-
-  setMapScale(mapScale: number): void {
-    // Terraria uses this same capped curve for head icons on the full map.
-    this.headScale = Math.min(1, (mapScale * 0.4 + 1) / 3);
-    this.root.style.setProperty('--map-icon-scale', String(this.headScale));
   }
 
   private layer(name: string): HTMLElement {
@@ -147,11 +140,11 @@ export class MapEntityLayer {
     // Keep the game palette local so dedicated-server rendering never depends on client graphics state.
     const teamColors: Record<number, string> = {
       0: '#ffffff',
-      1: '#e62814',
-      2: '#14c81e',
-      3: '#4b5aff',
-      4: '#c8b400',
-      5: '#ff69b4',
+      1: '#da3b3b',
+      2: '#3bda55',
+      3: '#3b95da',
+      4: '#f2dd64',
+      5: '#e064f2',
     };
     return teamColors[Number(team)] || teamColors[0];
   }
@@ -175,78 +168,52 @@ export class MapEntityLayer {
 
     try {
       context.imageSmoothingEnabled = false;
+      const blackSilhouette = this.createTintedSilhouette(source, '#000000');
+      const teamSilhouette = this.createTintedSilhouette(source, innerOutlineColor);
+      if (!blackSilhouette || !teamSilhouette) return null;
+
+      // Terraria's map outline is two color-only draw passes followed by the unmodified sprite.
+      // Drawing the silhouette layers with source-over preserves antialiased edge alpha.
+      this.drawTerrariaOutlineRing(context, blackSilhouette, padding, 4);
+      this.drawTerrariaOutlineRing(context, teamSilhouette, padding, 2);
       context.drawImage(source, padding, padding);
-      const original = context.getImageData(padding, padding, sourceWidth, sourceHeight).data;
-      const output = context.createImageData(width, height);
-      const outputPixels = output.data;
-      const color = this.parseHexColor(innerOutlineColor);
-
-      this.drawOutlineRing(outputPixels, original, sourceWidth, sourceHeight, width, 4, [0, 0, 0]);
-      this.drawOutlineRing(outputPixels, original, sourceWidth, sourceHeight, width, 2, color);
-      this.drawOriginalSprite(outputPixels, original, sourceWidth, sourceHeight, width, padding);
-
-      context.putImageData(output, 0, 0);
       return canvas;
     } catch {
       return null;
     }
   }
 
-  private drawOutlineRing(
-    destination: Uint8ClampedArray,
-    source: Uint8ClampedArray,
-    sourceWidth: number,
-    sourceHeight: number,
-    destinationWidth: number,
+  private createTintedSilhouette(
+    source: HTMLImageElement,
+    color: string,
+  ): HTMLCanvasElement | null {
+    const silhouette = document.createElement('canvas');
+    silhouette.width = source.naturalWidth;
+    silhouette.height = source.naturalHeight;
+    const context = silhouette.getContext('2d');
+    if (!context) return null;
+
+    context.imageSmoothingEnabled = false;
+    context.drawImage(source, 0, 0);
+    context.globalCompositeOperation = 'source-in';
+    context.fillStyle = color;
+    context.fillRect(0, 0, silhouette.width, silhouette.height);
+    context.globalCompositeOperation = 'source-over';
+    return silhouette;
+  }
+
+  private drawTerrariaOutlineRing(
+    destination: CanvasRenderingContext2D,
+    silhouette: HTMLCanvasElement,
+    padding: number,
     radius: number,
-    color: [number, number, number],
   ): void {
-    const padding = 4;
     for (let offsetY = -radius; offsetY <= radius; offsetY += 2) {
       for (let offsetX = -radius; offsetX <= radius; offsetX += 2) {
         if (Math.abs(offsetX) + Math.abs(offsetY) !== radius) continue;
-        for (let y = 0; y < sourceHeight; y++) {
-          for (let x = 0; x < sourceWidth; x++) {
-            const sourceOffset = (y * sourceWidth + x) * 4;
-            const alpha = source[sourceOffset + 3];
-            if (alpha === 0) continue;
-            const targetX = x + padding + offsetX;
-            const targetY = y + padding + offsetY;
-            const targetOffset = (targetY * destinationWidth + targetX) * 4;
-            destination[targetOffset] = color[0];
-            destination[targetOffset + 1] = color[1];
-            destination[targetOffset + 2] = color[2];
-            destination[targetOffset + 3] = Math.max(destination[targetOffset + 3], alpha);
-          }
-        }
+        destination.drawImage(silhouette, padding + offsetX, padding + offsetY);
       }
     }
-  }
-
-  private drawOriginalSprite(
-    destination: Uint8ClampedArray,
-    source: Uint8ClampedArray,
-    sourceWidth: number,
-    sourceHeight: number,
-    destinationWidth: number,
-    padding: number,
-  ): void {
-    for (let y = 0; y < sourceHeight; y++) {
-      for (let x = 0; x < sourceWidth; x++) {
-        const sourceOffset = (y * sourceWidth + x) * 4;
-        const targetOffset = ((y + padding) * destinationWidth + x + padding) * 4;
-        destination[targetOffset] = source[sourceOffset];
-        destination[targetOffset + 1] = source[sourceOffset + 1];
-        destination[targetOffset + 2] = source[sourceOffset + 2];
-        destination[targetOffset + 3] = source[sourceOffset + 3];
-      }
-    }
-  }
-
-  private parseHexColor(value: string): [number, number, number] {
-    const match = /^#([0-9a-f]{6})$/i.exec(value);
-    const color = match ? Number.parseInt(match[1], 16) : 0xffffff;
-    return [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff];
   }
 
   drawEntities(entities: MapNpcMarker[]) {

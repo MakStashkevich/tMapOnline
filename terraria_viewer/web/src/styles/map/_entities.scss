@@ -10,7 +10,7 @@
   place-items: center;
   width: max-content;
   height: max-content;
-  transform: translate(-50%, -50%) scale(var(--map-icon-scale, 1));
+  transform: translate(-50%, -50%);
   z-index: 1;
 }
 .entity-marker img {

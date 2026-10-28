@@ -17,7 +17,10 @@ const modules = await activateModules('world_map');
 
 (() => {
   const $ = (id: string): any => document.getElementById(id);
-  const debugMode = modules['world_map.debug'] && /^\/world-map\/debug\/?$/.test(location.pathname);
+  // The explicit debug URL is the access switch for diagnostics and map import tools.
+  // Keep these controls absent from the regular map, regardless of module defaults.
+  const debugMode =
+    /^\/debug\/?$/.test(location.pathname) || /^\/world-map\/debug\/?$/.test(location.pathname);
   if (debugMode) {
     document
       .querySelector('.zoom-tools')
@@ -250,7 +253,6 @@ const modules = await activateModules('world_map');
       height = Math.max(1, Math.round(data.world.height * scale));
     $('stage').style.width = `${width}px`;
     $('stage').style.height = `${height}px`;
-    mapEntityLayer.setMapScale(scale);
     const paths = $('paths');
     paths.setAttribute('viewBox', `0 0 ${data.world.width} ${data.world.height}`);
     paths.style.width = `${width}px`;
