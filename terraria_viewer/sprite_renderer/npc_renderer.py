@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from .xnb_texture import XnbTextureReader
 
@@ -12,7 +12,7 @@ from .xnb_texture import XnbTextureReader
 class NpcSpriteRenderer:
     """Render either a registered NPC head icon or a crop from its body sheet."""
 
-    def __init__(self, texture_reader: XnbTextureReader | None = None, outline_radius: int = 2) -> None:
+    def __init__(self, texture_reader: XnbTextureReader | None = None, outline_radius: int = 1) -> None:
         self._texture_reader = texture_reader or XnbTextureReader()
         self._outline_radius = max(0, outline_radius)
 
@@ -62,29 +62,43 @@ class NpcSpriteRenderer:
         radius = self._outline_radius
         if radius == 0:
             return sprite
-        outlined = Image.new(
-            "RGBA",
-            (sprite.width + radius * 2, sprite.height + radius * 2),
-            (255, 255, 255, 0),
+
+        # Outline the visible sprite silhouette, rather than its rectangular canvas.
+        source_alpha = sprite.getchannel("A")
+        solid_shape = source_alpha.point(lambda value: 255 if value else 0)
+        solid_shape = self._fill_enclosed_transparency(solid_shape)
+
+        output_size = (sprite.width + radius * 2, sprite.height + radius * 2)
+        expanded_shape = Image.new("L", output_size, 0)
+        expanded_shape.paste(solid_shape, (radius, radius))
+        expanded_shape = expanded_shape.filter(ImageFilter.MaxFilter(radius * 2 + 1))
+
+        original_shape = Image.new("L", output_size, 0)
+        original_shape.paste(solid_shape, (radius, radius))
+        outline_alpha = ImageChops.subtract(expanded_shape, original_shape)
+
+        result = Image.new("RGBA", output_size, (255, 255, 255, 0))
+        result.putalpha(outline_alpha)
+        result.alpha_composite(sprite, (radius, radius))
+        return result
+
+    @staticmethod
+    def _fill_enclosed_transparency(mask: Image.Image) -> Image.Image:
+        """Mark enclosed transparent pixels as part of the silhouette."""
+        pixels = mask.load()
+        width, height = mask.size
+        exterior = 128
+
+        # Flood-fill every transparent region connected to the canvas edge. Any
+        # transparent pixels left afterward are holes inside the face silhouette.
+        edge_points = (
+            [(x, 0) for x in range(width)]
+            + [(x, height - 1) for x in range(width)]
+            + [(0, y) for y in range(height)]
+            + [(width - 1, y) for y in range(height)]
         )
-        source_alpha = sprite.getchannel("A").tobytes()  # pyright: ignore[reportUnknownMemberType]
-        binary_alpha = bytes(255 if value else 0 for value in source_alpha)
-        alpha = Image.frombytes("L", sprite.size, binary_alpha)  # pyright: ignore[reportUnknownMemberType]
-        outline_alpha = Image.new("L", outlined.size, 0)
-        for offset_y in range(-radius, radius + 1):
-            for offset_x in range(-radius, radius + 1):
-                if offset_x == 0 and offset_y == 0:
-                    continue
-                shifted = Image.new("L", outlined.size, 0)
-                shifted.paste(alpha, (radius + offset_x, radius + offset_y))
-                base_pixels = outline_alpha.tobytes()  # pyright: ignore[reportUnknownMemberType]
-                shifted_pixels = shifted.tobytes()  # pyright: ignore[reportUnknownMemberType]
-                outline_pixels = bytes(max(left, right) for left, right in zip(base_pixels, shifted_pixels))
-                outline_alpha = Image.frombytes(  # pyright: ignore[reportUnknownMemberType]
-                    "L",
-                    outlined.size,
-                    outline_pixels,
-                )
-        outlined.putalpha(outline_alpha)
-        outlined.paste(sprite, (radius, radius))
-        return outlined
+        for point in edge_points:
+            if pixels[point] == 0:
+                ImageDraw.floodfill(mask, point, exterior, thresh=0)
+
+        return mask.point(lambda value: 0 if value == exterior else 255)

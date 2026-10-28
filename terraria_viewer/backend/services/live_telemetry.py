@@ -220,9 +220,8 @@ class LiveTelemetryMixin(StoreMixinContract):
                 head_texture = False
         if not source.is_file():
             return None
-        # Include the renderer revision so existing full-body icons are replaced
-        # automatically after deploying the head-portrait crop.
-        digest = hashlib.sha256(f"python-head-portrait-outline-v7:{source_key}:{frame_width}x{frame_height}".encode("utf-8")).hexdigest()[:32]
+        # Bump this revision whenever silhouette extraction or outline rendering changes.
+        digest = hashlib.sha256(f"python-head-silhouette-outline-v9:{source_key}:{frame_width}x{frame_height}".encode("utf-8")).hexdigest()[:32]
         output = self._npc_sprites_dir / f"{digest}.png"
         if output.is_file():
             try:
