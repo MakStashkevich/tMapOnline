@@ -26,6 +26,9 @@
   height: auto;
   image-rendering: pixelated;
 }
+.entity-marker .entity-head-sprite.facing-left {
+  transform: scaleX(-1);
+}
 .coin-layer {
   position: absolute;
   inset: 0;

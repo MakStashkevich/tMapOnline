@@ -129,6 +129,7 @@ class NpcEntity:
     boss_head_slot: int
     mod_texture: str
     head_texture: str
+    direction: int | None
     icon_url: str | None = None
 
     @classmethod
@@ -154,6 +155,11 @@ class NpcEntity:
             boss_head_slot=_integer_or(raw.get("bossHeadSlot"), -1),
             mod_texture=str(raw.get("modTexture") or ""),
             head_texture=str(raw.get("headTexture") or ""),
+            direction=(
+                direction
+                if (direction := _integer(raw.get("direction"))) in (-1, 1)
+                else None
+            ),
         )
 
     def with_icon(self, icon_url: str | None) -> NpcEntity:
@@ -163,7 +169,7 @@ class NpcEntity:
         return {
             "id": self.entity_id, "type": self.npc_type, "name": self.name,
             "boss": self.is_boss, "x": self.tile_x, "y": self.tile_y,
-            "icon_url": self.icon_url,
+            "direction": self.direction, "icon_url": self.icon_url,
         }
 
 
@@ -218,6 +224,7 @@ class PlayerDeath:
     tile_x: int
     tile_y: int
     timestamp: float
+    event_id: str | None
 
     @classmethod
     def from_payload(cls, value: Any) -> PlayerDeath | None:
@@ -234,6 +241,7 @@ class PlayerDeath:
             tile_x=tile_x,
             tile_y=tile_y,
             timestamp=_number(raw.get("at")) or 0,
+            event_id=(str(raw.get("id"))[:64] if raw.get("id") else None),
         )
 
 
@@ -274,6 +282,7 @@ class LiveTelemetrySnapshot:
     map_scan: dict[str, Any] | None
     game_mode: dict[str, Any] | None
     generated_at: Any
+    snapshot_id: int | None
 
     @classmethod
     def from_payload(cls, value: dict[str, Any]) -> LiveTelemetrySnapshot:
@@ -312,6 +321,7 @@ class LiveTelemetrySnapshot:
             map_scan=_optional_object(root.get("mapScan")),
             game_mode=_optional_object(world.get("gameMode")),
             generated_at=root.get("generatedAtUnix"),
+            snapshot_id=_integer(root.get("snapshotId")),
         )
 
 

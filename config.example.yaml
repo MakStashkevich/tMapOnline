@@ -11,6 +11,10 @@ terraria:
   max_players: 8
 storage:
   data_dir: ~/Library/Application Support/TerrariaTunnel
+  death_retention_seconds: 3600
+
+telemetry:
+  snapshot_interval_ticks: 300
 tunnel_status_file: ~/Library/Application Support/TerrariaTunnel/tunnel-status.json
 site:
   pages:

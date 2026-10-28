@@ -64,6 +64,7 @@ internal sealed class WorldEntitySnapshotBuilder
                     type = npc.type,
                     name = MapTileNameCatalog.GetLocalizedNpcName(npc),
                     boss = npc.boss,
+                    direction = npc.spriteDirection,
                     x = (int)Math.Floor(npc.Center.X / 16.0),
                     y = (int)Math.Floor(npc.Center.Y / 16.0),
                     frameWidth = Math.Max(1, npc.frame.Width > 1 ? npc.frame.Width : npc.width),

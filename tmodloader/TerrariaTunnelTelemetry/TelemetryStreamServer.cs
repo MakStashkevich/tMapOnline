@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -20,6 +21,9 @@ internal sealed class TelemetryStreamServer : IDisposable
     private CancellationTokenSource? _shutdown;
     private string? _latestSnapshot;
     private int _nextClientId;
+    private long _lastAcknowledgedSnapshotId;
+
+    public long LastAcknowledgedSnapshotId => Interlocked.Read(ref _lastAcknowledgedSnapshotId);
 
     public TelemetryStreamServer(Mod mod)
     {
@@ -94,7 +98,10 @@ internal sealed class TelemetryStreamServer : IDisposable
 
             socket.NoDelay = true;
             var id = Interlocked.Increment(ref _nextClientId);
-            var client = new TelemetryClient(socket, () => _clients.TryRemove(id, out _));
+            var client = new TelemetryClient(
+                socket,
+                () => _clients.TryRemove(id, out _),
+                AcknowledgeSnapshot);
             _clients[id] = client;
 
             // A new reader needs the current state immediately, without waiting for another game tick.
@@ -106,10 +113,22 @@ internal sealed class TelemetryStreamServer : IDisposable
         }
     }
 
+    private void AcknowledgeSnapshot(long snapshotId)
+    {
+        while (true)
+        {
+            var previous = Interlocked.Read(ref _lastAcknowledgedSnapshotId);
+            if (snapshotId <= previous
+                || Interlocked.CompareExchange(ref _lastAcknowledgedSnapshotId, snapshotId, previous) == previous)
+                return;
+        }
+    }
+
     private sealed class TelemetryClient
     {
         private readonly TcpClient _socket;
         private readonly Action _onClosed;
+        private readonly Action<long> _onAcknowledged;
         private readonly Channel<string> _pending = Channel.CreateBounded<string>(
             new BoundedChannelOptions(1)
             {
@@ -120,10 +139,11 @@ internal sealed class TelemetryStreamServer : IDisposable
             }
         );
 
-        public TelemetryClient(TcpClient socket, Action onClosed)
+        public TelemetryClient(TcpClient socket, Action onClosed, Action<long> onAcknowledged)
         {
             _socket = socket;
             _onClosed = onClosed;
+            _onAcknowledged = onAcknowledged;
         }
 
         public void Publish(string jsonLine) => _pending.Writer.TryWrite(jsonLine);
@@ -133,14 +153,11 @@ internal sealed class TelemetryStreamServer : IDisposable
             try
             {
                 var stream = _socket.GetStream();
-                await foreach (
-                    var jsonLine in _pending.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)
-                )
-                {
-                    var bytes = Encoding.UTF8.GetBytes(jsonLine);
-                    await stream.WriteAsync(bytes.AsMemory(), cancellationToken).ConfigureAwait(false);
-                    await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                }
+                var writeTask = WriteSnapshotsAsync(stream, cancellationToken);
+                var acknowledgementTask = ReadAcknowledgementsAsync(stream, cancellationToken);
+                await Task.WhenAny(writeTask, acknowledgementTask).ConfigureAwait(false);
+                Stop();
+                await Task.WhenAll(writeTask, acknowledgementTask).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
             catch (IOException) { }
@@ -150,6 +167,46 @@ internal sealed class TelemetryStreamServer : IDisposable
             {
                 Stop();
                 _onClosed();
+            }
+        }
+
+        private async Task WriteSnapshotsAsync(NetworkStream stream, CancellationToken cancellationToken)
+        {
+                await foreach (
+                    var jsonLine in _pending.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)
+                )
+                {
+                    var bytes = Encoding.UTF8.GetBytes(jsonLine);
+                    await stream.WriteAsync(bytes.AsMemory(), cancellationToken).ConfigureAwait(false);
+                    await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                }
+        }
+
+        private async Task ReadAcknowledgementsAsync(NetworkStream stream, CancellationToken cancellationToken)
+        {
+            using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                {
+                    Stop();
+                    return;
+                }
+
+                try
+                {
+                    using var document = JsonDocument.Parse(line);
+                    if (!document.RootElement.TryGetProperty("ackSnapshotId", out var value)
+                        || !value.TryGetInt64(out var acknowledgedSnapshotId))
+                        continue;
+
+                    _onAcknowledged(acknowledgedSnapshotId);
+                }
+                catch (JsonException)
+                {
+                    // Ignore malformed control lines and keep the telemetry stream alive.
+                }
             }
         }
 

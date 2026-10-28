@@ -39,6 +39,7 @@ type MapNpcMarker = {
   name?: string;
   boss?: boolean;
   icon_url?: string;
+  direction?: number | null;
 };
 type MapCoinMarker = {
   id: number;
@@ -186,6 +187,8 @@ export class MapEntityLayer {
     marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
     marker.title = entity.name || (entity.boss ? 'Босс' : 'NPC');
     sprite.className = 'entity-head-sprite';
+    // Terraria draws NPC sprites flipped when spriteDirection is 1.
+    if (entity.direction === 1) sprite.classList.add('facing-left');
     marker.append(sprite);
     layer.append(marker);
   }

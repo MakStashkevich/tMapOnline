@@ -36,11 +36,13 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         npc_sprites_dir: Path = NPC_SPRITES_DIR,
         npc_textures_dir: Path = NPC_TEXTURES_DIR,
         map_sprites_dir: Path = MAP_SPRITES_DIR,
+        death_retention_seconds: int = 3600,
     ) -> None:
         self._lock = threading.Lock()
         self._events_file = events_file
         self._history_file = history_file
         self._players_file = players_file
+        self._death_retention_seconds = max(0, int(death_retention_seconds))
         self._metrics_file = metrics_file
         self._avatars_dir = avatars_dir
         self.avatar_directory = avatars_dir

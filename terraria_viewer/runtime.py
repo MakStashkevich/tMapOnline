@@ -38,6 +38,7 @@ def _make_store(config: dict[str, Any]) -> StatusStore:
         npc_sprites_dir=data / "npc-sprites",
         npc_textures_dir=data / "npc-textures",
         map_sprites_dir=data / "map-sprites",
+        death_retention_seconds=config["storage"]["death_retention_seconds"],
     )
 
 
@@ -102,6 +103,15 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
                 stdout=game_log_handle,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
+                env={
+                    **os.environ,
+                    "TERRARIA_TELEMETRY_INTERVAL_TICKS": str(
+                        config["telemetry"]["snapshot_interval_ticks"]
+                    ),
+                    "TERRARIA_TELEMETRY_DEATH_RETENTION_SECONDS": str(
+                        config["storage"]["death_retention_seconds"]
+                    ),
+                },
             )
             game_process = started_process
             logger.info("Started local tModLoader process %s; SSH tunnel is not managed here.", started_process.pid)

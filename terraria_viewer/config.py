@@ -16,7 +16,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "game_port": 7777,
         "max_players": 8,
     },
-    "storage": {"data_dir": "~/Library/Application Support/TerrariaTunnel"},
+    "storage": {
+        "data_dir": "~/Library/Application Support/TerrariaTunnel",
+        "death_retention_seconds": 3600,
+    },
+    # 300 game ticks is five seconds at Terraria's normal 60 TPS.
+    # Set to 1 to publish once per game tick for temporary profiling.
+    "telemetry": {"snapshot_interval_ticks": 300},
     "tunnel_status_file": "~/Library/Application Support/TerrariaTunnel/tunnel-status.json",
     "site": {
         "pages": {
@@ -73,6 +79,12 @@ def load_config(path: str | Path) -> dict[str, Any]:
         value = config["server"].get(key)
         if not isinstance(value, int) or not 1 <= value <= 65535:
             raise ValueError(f"server.{key} must be an integer from 1 to 65535")
+    death_retention = config["storage"].get("death_retention_seconds")
+    if type(death_retention) is not int or death_retention < 0:
+        raise ValueError("storage.death_retention_seconds must be a non-negative integer")
+    snapshot_interval = config["telemetry"].get("snapshot_interval_ticks")
+    if type(snapshot_interval) is not int or snapshot_interval < 1:
+        raise ValueError("telemetry.snapshot_interval_ticks must be a positive integer")
     return config
 
 

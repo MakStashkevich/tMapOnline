@@ -86,6 +86,11 @@ class TelemetryStreamClient:
                         if snapshot_object.get("schemaVersion") == 1:
                             try:
                                 self._on_snapshot(snapshot_object)
+                                snapshot_id = snapshot_object.get("snapshotId")
+                                if isinstance(snapshot_id, int) and not isinstance(snapshot_id, bool):
+                                    connection.sendall(
+                                        (json.dumps({"ackSnapshotId": snapshot_id}) + "\n").encode("utf-8")
+                                    )
                             except Exception:
                                 logger.exception("Failed to apply tModLoader telemetry snapshot; keeping the stream open.")
                 if not self._stop.is_set():

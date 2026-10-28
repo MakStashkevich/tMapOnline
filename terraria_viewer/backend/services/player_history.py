@@ -105,6 +105,7 @@ class PlayerHistoryMixin(StoreMixinContract):
                     )
                     record.pop("positions", None)
                     record.pop("visited_tiles", None)
+            self._prune_player_deaths_locked(time.time())
             # A process exit cannot leave a session marked as currently online.
             now = time.time()
             for record in self._players.values():

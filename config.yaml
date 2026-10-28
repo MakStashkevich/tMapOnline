@@ -14,6 +14,10 @@ terraria:
 
 storage:
   data_dir: ~/Library/Application Support/TerrariaTunnel
+  death_retention_seconds: 3600
+
+telemetry:
+  snapshot_interval_ticks: 1
 
 tunnel_status_file: ~/Library/Application Support/TerrariaTunnel/tunnel-status.json
 

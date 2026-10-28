@@ -5,6 +5,7 @@ from ...models import LiveTelemetrySnapshot, NpcEntity, PlayerDeath
 from ..store_common import (
     Any,
     TERRARIA_CLIENT_IMAGES,
+    as_json_object,
     cast,
     StoreMixinContract,
     is_valid_player_name,
@@ -59,8 +60,7 @@ class LiveTelemetryMixin(StoreMixinContract):
             self._active_coins_world_id = str(world_id) if world_id is not None else None
         players = [player for player in telemetry.players if is_valid_player_name(player.name)]
         self.set_players_online(len(players), players, world=world)
-        if telemetry.player_deaths:
-            self._save_player_death_locations(telemetry.player_deaths, world)
+        self._save_player_death_locations(telemetry.player_deaths, world)
         pylons = [pylon.to_payload() for pylon in telemetry.pylons]
         if telemetry.has_pylon_snapshot:
             with self._lock:
@@ -157,12 +157,13 @@ class LiveTelemetryMixin(StoreMixinContract):
     def _save_player_death_locations(
         self, deaths: tuple[PlayerDeath, ...], world: dict[str, Any]
     ) -> None:
-        """Persist a bounded per-player death history for map markers."""
+        """Persist death markers until the configured retention period expires."""
         world_id = world.get("id", world.get("world_id"))
         world_name = str(world.get("name") or world.get("world_name") or "")
         width = int(world.get("width") or 0)
         height = int(world.get("height") or 0)
         with self._lock:
+            changed = self._prune_player_deaths_locked(time.time())
             for death in deaths:
                 player_id = (
                     f"uuid:{death.uuid.casefold()}" if death.uuid
@@ -175,15 +176,29 @@ class LiveTelemetryMixin(StoreMixinContract):
                          if str(item.get("name", "")).casefold() == death.name.casefold()),
                         None,
                     )
-                if record is None or death.tile_x >= width or death.tile_y >= height:
+                if death.tile_x >= width or death.tile_y >= height:
                     continue
+                if record is None:
+                    record = self._players.setdefault(player_id, {
+                        "id": player_id,
+                        "name": death.name,
+                        "uuid": death.uuid,
+                        "first_seen_at": death.timestamp,
+                        "last_seen_at": death.timestamp,
+                        "total_seconds": 0,
+                        "sessions": [],
+                    })
 
                 locations = cast(
                     list[dict[str, Any]], record.setdefault("death_locations", [])
                 )
                 if any(
                     item.get("world_id") == world_id
-                    and item.get("timestamp") == death.timestamp
+                    and (
+                        item.get("event_id") == death.event_id
+                        if death.event_id
+                        else item.get("timestamp") == death.timestamp
+                    )
                     for item in locations
                 ):
                     continue
@@ -193,9 +208,37 @@ class LiveTelemetryMixin(StoreMixinContract):
                     "x": death.tile_x,
                     "y": death.tile_y,
                     "timestamp": death.timestamp,
+                    "event_id": death.event_id,
                 })
-                del locations[:-100]
-            self._save_players_locked()
+                changed = True
+            if changed:
+                self._save_players_locked()
+
+    def _prune_player_deaths_locked(self, now: float) -> bool:
+        """Apply the configured TTL while preserving every unexpired death."""
+        retention = self._death_retention_seconds
+        if retention == 0:
+            return False
+
+        cutoff = now - retention
+        changed = False
+        for record in self._players.values():
+            raw_locations = record.get("death_locations")
+            if not isinstance(raw_locations, list):
+                continue
+            locations = cast(list[Any], raw_locations)
+            retained: list[Any] = []
+            for location in locations:
+                try:
+                    timestamp = float(as_json_object(location).get("timestamp", 0))
+                except (TypeError, ValueError):
+                    timestamp = 0
+                if timestamp >= cutoff:
+                    retained.append(location)
+            if len(retained) != len(locations):
+                record["death_locations"] = retained
+                changed = True
+        return changed
 
     def _write_map_coin_sprite(self, item_type: int) -> str | None:
         """Cache the native in-game sprite for a dropped vanilla coin pile."""

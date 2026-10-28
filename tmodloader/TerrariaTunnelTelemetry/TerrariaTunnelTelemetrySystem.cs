@@ -24,12 +24,10 @@ namespace TerrariaTunnelTelemetry;
 
 public sealed class TerrariaTunnelTelemetrySystem : ModSystem
 {
-    private static readonly TimeSpan SnapshotInterval = TimeSpan.FromSeconds(1);
     private static readonly JsonSerializerOptions JsonOptions = new();
     private readonly ConcurrentDictionary<int, string> _clientUuids = new();
     private readonly System.Collections.Generic.Dictionary<int, PlayerSession> _sessions = new();
     private readonly ConcurrentDictionary<int, byte> _teleportedSlots = new();
-    private readonly System.Collections.Generic.HashSet<int> _deadPlayerSlots = new();
     private readonly System.Collections.Generic.List<PendingPlayerDeath> _pendingPlayerDeaths = new();
     private TelemetryStreamServer? _telemetryStream;
     private MapTileNameCatalog? _mapTileNames;
@@ -39,7 +37,12 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private WorldMapScanner? _mapScanner;
     private bool _loggedFirstSnapshot;
     private bool _loggedUpdateHook;
-    private DateTime _lastSnapshotUtc = DateTime.MinValue;
+    private readonly int _snapshotIntervalTicks = ReadPositiveEnvironmentInteger(
+        "TERRARIA_TELEMETRY_INTERVAL_TICKS", 300);
+    private readonly int _deathRetentionSeconds = ReadNonNegativeEnvironmentInteger(
+        "TERRARIA_TELEMETRY_DEATH_RETENTION_SECONDS", 3600);
+    private long _serverTickCount;
+    private long _nextSnapshotId;
 
     public override void Load()
     {
@@ -50,6 +53,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
 
         Terraria.On_MessageBuffer.GetData += CaptureClientPackets;
         On_Player.Teleport += CapturePlayerTeleport;
+        On_Player.KillMe += CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly += OnServerTick;
         _telemetryStream = new TelemetryStreamServer(Mod);
         _mapTileNames = new MapTileNameCatalog(Mod);
@@ -64,13 +68,13 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     {
         Terraria.On_MessageBuffer.GetData -= CaptureClientPackets;
         On_Player.Teleport -= CapturePlayerTeleport;
+        On_Player.KillMe -= CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly -= OnServerTick;
         _telemetryStream?.Dispose();
         _telemetryStream = null;
         _clientUuids.Clear();
         _teleportedSlots.Clear();
         _sessions.Clear();
-        _deadPlayerSlots.Clear();
         _pendingPlayerDeaths.Clear();
         _mapScanner = null;
         _mapTileNames = null;
@@ -90,8 +94,50 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     {
         if (Main.netMode != NetmodeID.Server)
             return;
+
+        AcknowledgeDeliveredDeaths();
+        RemoveExpiredPendingDeaths();
         _mapScanner?.CaptureNextChunk();
-        UpdateSnapshotIfDue();
+        _serverTickCount++;
+        if (_serverTickCount % _snapshotIntervalTicks == 0)
+            UpdateSnapshotIfDue();
+    }
+
+    private void CapturePlayerDeath(On_Player.orig_KillMe orig, Player self,
+        PlayerDeathReason damageSource, double damage, int hitDirection, bool pvp)
+    {
+        orig(self, damageSource, damage, hitDirection, pvp);
+        if (Main.netMode != NetmodeID.Server || !self.dead || self.whoAmI < 0 || self.whoAmI >= Main.maxPlayers)
+            return;
+
+        var name = self.name?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name is "." or ".." or "...")
+            return;
+
+        _pendingPlayerDeaths.Add(new PendingPlayerDeath(
+            Guid.NewGuid().ToString("N"),
+            name,
+            ReadClientUuid(self.whoAmI),
+            (int)Math.Floor(self.Center.X / 16.0),
+            (int)Math.Floor(self.Center.Y / 16.0),
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+    }
+
+    private void AcknowledgeDeliveredDeaths()
+    {
+        var lastAcknowledged = _telemetryStream?.LastAcknowledgedSnapshotId ?? 0;
+        if (lastAcknowledged > 0)
+            _pendingPlayerDeaths.RemoveAll(death => death.LastSentSnapshotId > 0
+                && death.LastSentSnapshotId <= lastAcknowledged);
+    }
+
+    private void RemoveExpiredPendingDeaths()
+    {
+        if (_deathRetentionSeconds <= 0)
+            return;
+
+        var cutoff = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - _deathRetentionSeconds;
+        _pendingPlayerDeaths.RemoveAll(death => death.Timestamp < cutoff);
     }
 
     public override void OnWorldLoad()
@@ -112,15 +158,10 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         if (Main.netMode != NetmodeID.Server)
             return;
 
-        var now = DateTime.UtcNow;
-        if (now - _lastSnapshotUtc < SnapshotInterval)
-            return;
-        _lastSnapshotUtc = now;
-
         try
         {
             ReconcilePlayers();
-            PublishSnapshot(now);
+            PublishSnapshot();
         }
         catch (Exception exception)
         {
@@ -140,23 +181,6 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 continue;
 
             activeSlots.Add(slot);
-            if (player.dead)
-            {
-                if (_deadPlayerSlots.Add(slot))
-                {
-                    _pendingPlayerDeaths.Add(new PendingPlayerDeath(
-                        name,
-                        ReadClientUuid(slot),
-                        (int)Math.Floor(player.Center.X / 16.0),
-                        (int)Math.Floor(player.Center.Y / 16.0),
-                        DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                    ));
-                }
-            }
-            else
-            {
-                _deadPlayerSlots.Remove(slot);
-            }
             if (!_sessions.TryGetValue(slot, out var session) || !string.Equals(session.Name, name, StringComparison.Ordinal))
                 _sessions[slot] = new PlayerSession(name, ReadClientUuid(slot), DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             else if (ReadClientUuid(slot) is { } uuid && !string.Equals(session.Uuid, uuid, StringComparison.Ordinal))
@@ -166,19 +190,22 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         foreach (var slot in _sessions.Keys.Where(slot => !activeSlots.Contains(slot)).ToArray())
         {
             _sessions.Remove(slot);
-            _deadPlayerSlots.Remove(slot);
             _clientUuids.TryRemove(slot, out _);
             _teleportedSlots.TryRemove(slot, out _);
         }
     }
 
-    private void PublishSnapshot(DateTime now)
+    private void PublishSnapshot()
     {
         var calamityProgress = BossProgressSnapshotReader.ReadCalamityBossProgress();
         var bossDefeatCounts = BossVictoryTracker.SnapshotCounts();
+        var snapshotId = ++_nextSnapshotId;
+        foreach (var death in _pendingPlayerDeaths)
+            death.LastSentSnapshotId = snapshotId;
         var playerDeaths = _pendingPlayerDeaths
             .Select(death => new
             {
+                id = death.Id,
                 name = death.Name,
                 uuid = death.Uuid,
                 x = death.TileX,
@@ -226,6 +253,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var snapshot = new
         {
             schemaVersion = 1,
+            snapshotId,
             generatedAtUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             server = new
             {
@@ -386,6 +414,27 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         _ => "unknown"
     };
 
+    private static int ReadPositiveEnvironmentInteger(string key, int fallback)
+    {
+        var value = Environment.GetEnvironmentVariable(key);
+        return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : fallback;
+    }
+
+    private static int ReadNonNegativeEnvironmentInteger(string key, int fallback)
+    {
+        var value = Environment.GetEnvironmentVariable(key);
+        return int.TryParse(value, out var parsed) && parsed >= 0 ? parsed : fallback;
+    }
+
     private sealed record PlayerSession(string Name, string? Uuid, long JoinedAtUnix);
-    private sealed record PendingPlayerDeath(string Name, string? Uuid, int TileX, int TileY, long Timestamp);
+    private sealed class PendingPlayerDeath(string id, string name, string? uuid, int tileX, int tileY, long timestamp)
+    {
+        public string Id { get; } = id;
+        public string Name { get; } = name;
+        public string? Uuid { get; } = uuid;
+        public int TileX { get; } = tileX;
+        public int TileY { get; } = tileY;
+        public long Timestamp { get; } = timestamp;
+        public long LastSentSnapshotId { get; set; }
+    }
 }
