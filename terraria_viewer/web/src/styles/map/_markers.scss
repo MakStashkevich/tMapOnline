@@ -28,17 +28,18 @@
 .spawn-marker {
   position: absolute;
   display: block;
-  width: 22px;
-  height: 24px;
+  z-index: 2;
+  width: 28px;
+  height: 30px;
   transform: translate(-50%, -50%);
   image-rendering: pixelated;
 }
 .spawn-icon {
   display: block;
-  width: 22px;
-  height: 24px;
+  width: 28px;
+  height: 30px;
   image-rendering: pixelated;
-  filter: drop-shadow(0 1px 2px #000);
+  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 1px 2px #000);
 }
 .marker {
   position: absolute;
@@ -62,6 +63,16 @@
   object-fit: cover;
   image-rendering: pixelated;
   background: #263544;
+}
+.marker img.player-head-sprite {
+  width: 30px;
+  height: 34px;
+  border-radius: 0;
+  object-fit: contain;
+  background: transparent;
+  filter: drop-shadow(1px 0 var(--player-team-color)) drop-shadow(-1px 0 var(--player-team-color))
+    drop-shadow(0 1px var(--player-team-color)) drop-shadow(0 -1px var(--player-team-color))
+    drop-shadow(0 1px 2px #000);
 }
 .marker-name {
   max-width: 170px;

@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from collections import deque
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Protocol, cast
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageFilter
 
 from .xnb_texture import XnbTextureReader
+
+
+class _LookupImage(Protocol):
+    """The Pillow operation used to remap grayscale mask values."""
+
+    def point(self, lookup: Sequence[int], mode: str | None = None) -> Image.Image: ...
 
 
 class NpcSpriteRenderer:
@@ -70,7 +79,9 @@ class NpcSpriteRenderer:
 
         # Outline the visible sprite silhouette, rather than its rectangular canvas.
         source_alpha = sprite.getchannel("A")
-        solid_shape = source_alpha.point(lambda value: 255 if value else 0)
+        solid_shape = cast(_LookupImage, source_alpha).point(
+            [255 if value else 0 for value in range(256)]
+        )
         solid_shape = self._fill_enclosed_transparency(solid_shape)
 
         output_size = (sprite.width + radius * 2, sprite.height + radius * 2)
@@ -96,14 +107,29 @@ class NpcSpriteRenderer:
 
         # Flood-fill every transparent region connected to the canvas edge. Any
         # transparent pixels left afterward are holes inside the face silhouette.
-        edge_points = (
+        edge_points: list[tuple[int, int]] = (
             [(x, 0) for x in range(width)]
             + [(x, height - 1) for x in range(width)]
             + [(0, y) for y in range(height)]
             + [(width - 1, y) for y in range(height)]
         )
+        frontier: deque[tuple[int, int]] = deque()
         for point in edge_points:
             if pixels[point] == 0:
-                ImageDraw.floodfill(mask, point, exterior, thresh=0)
+                pixels[point] = exterior
+                frontier.append(point)
 
-        return mask.point(lambda value: 0 if value == exterior else 255)
+        while frontier:
+            x, y = frontier.popleft()
+            for neighbor in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                neighbor_x, neighbor_y = neighbor
+                if not (0 <= neighbor_x < width and 0 <= neighbor_y < height):
+                    continue
+                if pixels[neighbor] == 0:
+                    pixels[neighbor] = exterior
+                    frontier.append(neighbor)
+
+        enclosed_transparency_lut = [
+            0 if value == exterior else 255 for value in range(256)
+        ]
+        return cast(_LookupImage, mask).point(enclosed_transparency_lut)

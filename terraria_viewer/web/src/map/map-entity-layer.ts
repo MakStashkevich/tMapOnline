@@ -19,6 +19,7 @@ type MapPlayerMarker = {
   id: string;
   name?: string;
   avatar_url?: string;
+  team?: number | null;
   position?: { tileX?: number; tileY?: number; x?: number; y?: number };
   positions?: Array<{ x: number; y: number; tileX?: number; tileY?: number }>;
 };
@@ -102,16 +103,32 @@ export class MapEntityLayer {
       const point = this.markerPosition(player);
       if (!point) continue;
       const marker = document.createElement('div');
-      marker.className = 'marker';
+      marker.className = 'marker player-marker';
+      marker.style.setProperty('--player-team-color', this.playerTeamColor(player.team));
       marker.style.left = `${(point.x / this.world.width) * 100}%`;
       marker.style.top = `${(point.y / this.world.height) * 100}%`;
-      marker.append(this.makeAvatar(player));
+      const avatar = this.makeAvatar(player);
+      if (avatar instanceof HTMLImageElement) avatar.classList.add('player-head-sprite');
+      marker.append(avatar);
       const name = document.createElement('span');
       name.className = 'marker-name';
       name.textContent = player.name || 'Игрок';
       marker.append(name);
       layer.append(marker);
     }
+  }
+
+  private playerTeamColor(team: number | null | undefined): string {
+    // Keep the game palette local so dedicated-server rendering never depends on client graphics state.
+    const teamColors: Record<number, string> = {
+      0: '#ffffff',
+      1: '#e62814',
+      2: '#14c81e',
+      3: '#4b5aff',
+      4: '#c8b400',
+      5: '#ff69b4',
+    };
+    return teamColors[Number(team)] || teamColors[0];
   }
   drawEntities(entities: MapNpcMarker[]) {
     const layer = this.layer('entities');
@@ -270,7 +287,9 @@ export class MapEntityLayer {
   drawSpawn(world: MapEntityWorld) {
     const layer = this.layer('pylons'),
       key = JSON.stringify([world?.spawn_x, world?.spawn_y, world?.width, world?.height]);
-    if (key === this.spawnRenderKey) return;
+    // The feature toggle can remove the element without changing its coordinates.
+    // Confirm the node still exists before treating the cached render as current.
+    if (key === this.spawnRenderKey && layer.querySelector('.spawn-marker')) return;
     layer.querySelector('.spawn-marker')?.remove();
     this.spawnRenderKey = key;
     const x = Number(world?.spawn_x),

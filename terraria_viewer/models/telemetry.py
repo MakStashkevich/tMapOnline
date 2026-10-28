@@ -66,6 +66,7 @@ class PlayerSnapshot:
     teleported: bool
     map_capture: dict[str, Any] | None
     appearance: dict[str, Any] | None
+    team: int | None
 
     @classmethod
     def from_payload(cls, value: Any) -> PlayerSnapshot | None:
@@ -83,6 +84,11 @@ class PlayerSnapshot:
             teleported=raw.get("teleported") is True,
             map_capture=_optional_object(raw.get("mapCapture")),
             appearance=_optional_object(raw.get("appearance")),
+            team=(
+                team
+                if (team := _integer(raw.get("team"))) is not None and 0 <= team <= 5
+                else None
+            ),
         )
 
     def to_store_payload(self) -> dict[str, Any]:
@@ -96,6 +102,7 @@ class PlayerSnapshot:
             "teleported": self.teleported,
             "mapCapture": self.map_capture,
             "appearance": self.appearance,
+            "team": self.team,
         }
 
 

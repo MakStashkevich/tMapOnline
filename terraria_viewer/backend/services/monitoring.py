@@ -75,6 +75,10 @@ class MonitoringMixin(StoreMixinContract):
                     record["name"] = name
                     if uuid:
                         record["uuid"] = uuid
+                    if player.team is None:
+                        record.pop("team", None)
+                    else:
+                        record["team"] = player.team
                     appearance = player.appearance
                     if isinstance(appearance, dict) and (
                         appearance != record.get("appearance")

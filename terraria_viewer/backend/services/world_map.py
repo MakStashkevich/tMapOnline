@@ -160,11 +160,13 @@ class WorldMapMixin(StoreMixinContract):
                         and exploration.get("filename") == expected_exploration_filename
                         and (self._exploration_dir / expected_exploration_filename).is_file()
                     )
+                    is_online = player_id in online_player_ids
                     players.append({
                         "id": player_id,
                         "name": record.get("name"),
                         "avatar_url": record.get("avatar_url"),
-                        "online": player_id in online_player_ids,
+                        "online": is_online,
+                        "team": record.get("team") if is_online else None,
                         "position": record.get("position"),
                         "positions": [dict(point) for point in world.get("positions", []) if isinstance(point, dict)],
                         "chunks": chunks,

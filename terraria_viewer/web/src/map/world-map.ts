@@ -574,6 +574,7 @@ const modules = await activateModules('world_map');
         player.name,
         player.avatar_url,
         player.online,
+        player.team,
         player.position?.tileX,
         player.position?.tileY,
         player.position?.x,
