@@ -60,14 +60,25 @@ type MarkerMotion = {
   velocityX: number;
   velocityY: number;
   sampledAt: number;
+  samples: MotionSample[];
   element: HTMLElement | null;
   spriteUrl: string;
   direction: number | null | undefined;
 };
 
+type MotionSample = {
+  x: number;
+  y: number;
+  velocityX: number;
+  velocityY: number;
+  receivedAt: number;
+};
+
 const TERRARIA_TICKS_PER_SECOND = 60;
 const TERRARIA_PIXELS_PER_TILE = 16;
-const MAX_PREDICTION_SECONDS = 0.2;
+const INTERPOLATION_DELAY_MS = 80;
+const MAX_EXTRAPOLATION_SECONDS = 0.12;
+const MAX_MOTION_SAMPLES = 8;
 
 /** Renders map objects as DOM layers while keeping their sprite and fallback rules together. */
 export class MapEntityLayer {
@@ -235,7 +246,8 @@ export class MapEntityLayer {
     marker.append(sprite);
     layer.append(marker);
     motion.element = marker;
-    this.positionMarker(marker, motion.x, motion.y);
+    const point = this.predictedPosition(motion, performance.now());
+    this.positionMarker(marker, point.x, point.y);
   }
 
   drawEntities(entities: MapNpcMarker[]) {
@@ -300,7 +312,8 @@ export class MapEntityLayer {
     marker.append(sprite);
     layer.append(marker);
     motion.element = marker;
-    this.positionMarker(marker, motion.x, motion.y);
+    const point = this.predictedPosition(motion, performance.now());
+    this.positionMarker(marker, point.x, point.y);
   }
 
   private createMotion(
@@ -310,12 +323,16 @@ export class MapEntityLayer {
     spriteUrl: string,
     direction: number | null | undefined,
   ): MarkerMotion {
+    const receivedAt = performance.now();
+    const velocityX = Number(velocity?.x) || 0;
+    const velocityY = Number(velocity?.y) || 0;
     return {
       x,
       y,
-      velocityX: Number(velocity?.x) || 0,
-      velocityY: Number(velocity?.y) || 0,
-      sampledAt: performance.now(),
+      velocityX,
+      velocityY,
+      sampledAt: receivedAt,
+      samples: [{ x, y, velocityX, velocityY, receivedAt }],
       element: null,
       spriteUrl,
       direction,
@@ -329,13 +346,33 @@ export class MapEntityLayer {
     velocity: { x?: number; y?: number } | null | undefined,
     snap: boolean,
   ): void {
-    // Samples are authoritative; velocity only predicts between server updates.
+    const receivedAt = performance.now();
+    const velocityX = snap ? 0 : Number(velocity?.x) || 0;
+    const velocityY = snap ? 0 : Number(velocity?.y) || 0;
+
+    // Buffer authoritative samples so uneven HTTP polling does not move markers in visible steps.
     motion.x = x;
     motion.y = y;
-    motion.velocityX = snap ? 0 : Number(velocity?.x) || 0;
-    motion.velocityY = snap ? 0 : Number(velocity?.y) || 0;
-    motion.sampledAt = performance.now();
-    if (motion.element) this.positionMarker(motion.element, x, y);
+    motion.velocityX = velocityX;
+    motion.velocityY = velocityY;
+    motion.sampledAt = receivedAt;
+    if (snap) {
+      motion.samples = [{ x, y, velocityX, velocityY, receivedAt }];
+      if (motion.element) this.positionMarker(motion.element, x, y);
+      return;
+    }
+
+    const lastSample = motion.samples.at(-1);
+    if (lastSample && receivedAt <= lastSample.receivedAt) {
+      lastSample.x = x;
+      lastSample.y = y;
+      lastSample.velocityX = velocityX;
+      lastSample.velocityY = velocityY;
+      return;
+    }
+
+    motion.samples.push({ x, y, velocityX, velocityY, receivedAt });
+    if (motion.samples.length > MAX_MOTION_SAMPLES) motion.samples.shift();
   }
 
   private isLargeJump(motion: MarkerMotion, x: number, y: number): boolean {
@@ -344,15 +381,83 @@ export class MapEntityLayer {
   }
 
   private predictedPosition(motion: MarkerMotion, now: number): { x: number; y: number } {
+    const renderTime = now - INTERPOLATION_DELAY_MS;
+    const samples = motion.samples;
+    if (samples.length === 0) return { x: motion.x, y: motion.y };
+    if (renderTime <= samples[0].receivedAt) {
+      return { x: samples[0].x, y: samples[0].y };
+    }
+
+    while (samples.length > 2 && samples[1].receivedAt < renderTime - INTERPOLATION_DELAY_MS) {
+      samples.shift();
+    }
+
+    for (let index = 0; index < samples.length - 1; index += 1) {
+      const start = samples[index];
+      const end = samples[index + 1];
+      if (renderTime < start.receivedAt || renderTime > end.receivedAt) continue;
+
+      const durationSeconds = (end.receivedAt - start.receivedAt) / 1000;
+      if (durationSeconds <= 0) return { x: end.x, y: end.y };
+      const amount = (renderTime - start.receivedAt) / (end.receivedAt - start.receivedAt);
+      const tilesPerSecond = TERRARIA_TICKS_PER_SECOND / TERRARIA_PIXELS_PER_TILE;
+      return {
+        x: this.hermitePosition(
+          start.x,
+          end.x,
+          start.velocityX * tilesPerSecond,
+          end.velocityX * tilesPerSecond,
+          durationSeconds,
+          amount,
+        ),
+        y: this.hermitePosition(
+          start.y,
+          end.y,
+          start.velocityY * tilesPerSecond,
+          end.velocityY * tilesPerSecond,
+          durationSeconds,
+          amount,
+        ),
+      };
+    }
+
+    const latest = samples[samples.length - 1];
     const elapsedSeconds = Math.min(
-      Math.max(0, (now - motion.sampledAt) / 1000),
-      MAX_PREDICTION_SECONDS,
+      Math.max(0, (renderTime - latest.receivedAt) / 1000),
+      MAX_EXTRAPOLATION_SECONDS,
     );
     const tilesPerSecond = TERRARIA_TICKS_PER_SECOND / TERRARIA_PIXELS_PER_TILE;
     return {
-      x: motion.x + motion.velocityX * tilesPerSecond * elapsedSeconds,
-      y: motion.y + motion.velocityY * tilesPerSecond * elapsedSeconds,
+      x: latest.x + latest.velocityX * tilesPerSecond * elapsedSeconds,
+      y: latest.y + latest.velocityY * tilesPerSecond * elapsedSeconds,
     };
+  }
+
+  private hermitePosition(
+    start: number,
+    end: number,
+    startVelocity: number,
+    endVelocity: number,
+    durationSeconds: number,
+    amount: number,
+  ): number {
+    const amountSquared = amount * amount;
+    const amountCubed = amountSquared * amount;
+    const startWeight = 2 * amountCubed - 3 * amountSquared + 1;
+    const startTangentWeight = amountCubed - 2 * amountSquared + amount;
+    const endWeight = -2 * amountCubed + 3 * amountSquared;
+    const endTangentWeight = amountCubed - amountSquared;
+    const interpolated =
+      startWeight * start +
+      startTangentWeight * durationSeconds * startVelocity +
+      endWeight * end +
+      endTangentWeight * durationSeconds * endVelocity;
+
+    // Network velocity can briefly disagree with position after collision corrections.
+    const margin = Math.abs(end - start) * 0.15 + 0.05;
+    const lowerBound = Math.min(start, end) - margin;
+    const upperBound = Math.max(start, end) + margin;
+    return Math.max(lowerBound, Math.min(upperBound, interpolated));
   }
 
   private positionMarker(marker: HTMLElement, x: number, y: number): void {
@@ -382,7 +487,13 @@ export class MapEntityLayer {
       const age = (now - motion.sampledAt) / 1000;
       const point = this.predictedPosition(motion, now);
       this.positionMarker(motion.element, point.x, point.y);
-      if (age < MAX_PREDICTION_SECONDS && (motion.velocityX !== 0 || motion.velocityY !== 0)) {
+      const hasBufferedSamples =
+        motion.samples.length > 1 &&
+        now - INTERPOLATION_DELAY_MS < motion.samples[motion.samples.length - 1].receivedAt;
+      if (
+        hasBufferedSamples ||
+        (age < MAX_EXTRAPOLATION_SECONDS && (motion.velocityX !== 0 || motion.velocityY !== 0))
+      ) {
         hasRecentMovement = true;
       }
     }

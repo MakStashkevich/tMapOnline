@@ -28,7 +28,7 @@ telemetry:
   map_capture_interval_ticks: 30 # Цветные данные карты вокруг игроков
   map_tile_update_interval_ticks: 1 # Изменившиеся тайлы и стены, включая взрывы
   world_scan_interval_ticks: 1 # Пауза между обработкой чанков сканера
-  browser_live_poll_interval_ms: 500 # Частота лёгкого запроса живых данных
+  browser_live_poll_interval_ms: 50 # Частота лёгкого запроса живых данных
   browser_map_poll_interval_ms: 5000 # Частота получения обновлений карты
   browser_debug_poll_interval_ms: 1000 # Частота карты при открытых настройках debug
 ```
@@ -50,7 +50,7 @@ telemetry:
 | `telemetry.map_capture_interval_ticks`     | Частота захвата цветной карты вокруг игроков.                                                                                  |
 | `telemetry.world_scan_interval_ticks`      | Частота обработки чанков сканером мира.                                                                                        |
 | `telemetry.map_tile_update_interval_ticks` | Частота отправки изменённых тайлов и стен. Хуки отслеживают разрушение, размещение и взрывы.                                   |
-| `telemetry.browser_live_poll_interval_ms`  | Интервал компактного запроса браузера. Сейчас 500 мс.                                                                          |
+| `telemetry.browser_live_poll_interval_ms`  | Интервал компактного запроса браузера. По умолчанию 50 мс для плавного движения маркеров.                                      |
 | `telemetry.browser_map_poll_interval_ms`   | Интервал получения новых чанков карты браузером. Сейчас 5000 мс.                                                               |
 | `telemetry.browser_debug_poll_interval_ms` | Интервал обновления карты при открытых настройках debug. Сейчас 1000 мс.                                                       |
 

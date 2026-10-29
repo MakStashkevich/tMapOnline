@@ -22,7 +22,7 @@ telemetry:
   map_capture_interval_ticks: 30
   map_tile_update_interval_ticks: 1
   world_scan_interval_ticks: 1
-  browser_live_poll_interval_ms: 100
+  browser_live_poll_interval_ms: 50
   browser_map_poll_interval_ms: 5000
   browser_debug_poll_interval_ms: 1000
 

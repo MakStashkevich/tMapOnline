@@ -1011,8 +1011,8 @@ const modules = await activateModules('world_map');
         scheduleLiveRefresh();
       },
       Math.max(
-        100,
-        Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 500,
+        50,
+        Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 50,
       ),
     );
   }
