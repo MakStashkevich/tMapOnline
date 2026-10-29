@@ -176,10 +176,15 @@ class WorldMapMixin(StoreMixinContract):
             death_markers = []
             online_player_ids = set(self._online_player_ids)
             telemetry_age = None if self._telemetry_received_at is None else max(0, time.time() - self._telemetry_received_at)
+            active_npcs_fresh = (
+                telemetry_age is not None
+                and telemetry_age <= 5
+                and self._active_npcs_world_id in {str(active_id), active_name}
+                and (not requested or requested in {self._active_npcs_world_id, active_name})
+            )
             active_npcs = []
-            if telemetry_age is not None and telemetry_age <= 5 and self._active_npcs_world_id in {str(active_id), active_name}:
-                if not requested or requested in {self._active_npcs_world_id, active_name}:
-                    active_npcs = [item.to_payload() for item in self._active_npcs]
+            if active_npcs_fresh:
+                active_npcs = [item.to_payload() for item in self._active_npcs]
             active_coins = []
             if telemetry_age is not None and telemetry_age <= 5 and self._active_coins_world_id in {str(active_id), active_name}:
                 if not requested or requested in {self._active_coins_world_id, active_name}:
@@ -338,6 +343,7 @@ class WorldMapMixin(StoreMixinContract):
                 "players": players,
                 "deaths": death_markers,
                 "active_npcs": active_npcs,
+                "active_npcs_fresh": active_npcs_fresh,
                 "coins": active_coins,
                 "pylons": pylons,
                 "scan": scan,
@@ -595,6 +601,7 @@ class WorldMapMixin(StoreMixinContract):
                 "map_revision": map_revision,
                 "map_delta_reset": map_delta_reset,
                 "active_npcs": active_npcs,
+                "active_npcs_fresh": telemetry_is_fresh,
                 "coins": visible_coins,
                 "telemetry": {
                     "snapshot_id": self._telemetry_snapshot_id,

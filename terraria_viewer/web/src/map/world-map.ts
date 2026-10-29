@@ -862,6 +862,11 @@ const modules = await activateModules('world_map');
       const mapVersionChanged =
         Boolean(data) && Number(data.map_version || 0) !== Number(next.map_version || 0);
       if (sameWorld) {
+        // A stale telemetry response is not evidence that every NPC despawned.
+        // Keep the last authoritative snapshot until a fresh one arrives.
+        if (next.active_npcs_fresh !== true) {
+          next.active_npcs = data.active_npcs || [];
+        }
         const cached = new Map<string, any>(
           (data.base_chunks || []).map((chunk) => [`${chunk.x},${chunk.y}`, chunk]),
         );
@@ -1135,7 +1140,11 @@ const modules = await activateModules('world_map');
       liveSince = Math.max(liveSince, Number(death.timestamp) || 0);
     }
     data.deaths = payload.deaths || [];
-    data.active_npcs = payload.active_npcs || [];
+    // Polling and viewport stream reconnects can briefly return stale telemetry.
+    // Only a fresh snapshot may add or remove markers from the map.
+    if (payload.active_npcs_fresh === true) {
+      data.active_npcs = payload.active_npcs || [];
+    }
     data.coins = payload.coins || [];
     data.telemetry = payload.telemetry;
     data.live_payload_bytes = new Blob([responseText]).size;
