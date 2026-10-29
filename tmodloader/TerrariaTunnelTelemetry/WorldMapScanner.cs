@@ -21,7 +21,11 @@ internal sealed class WorldMapScanner
     private readonly MapTileNameCatalog _tileNames;
     private readonly MapTileDataCapture _tileData;
     private readonly Queue<object> _pendingCaptures = new();
-    private readonly HashSet<Microsoft.Xna.Framework.Point> _pendingTileChanges = new();
+    private readonly Dictionary<Microsoft.Xna.Framework.Point, long> _pendingTileChanges = new();
+    private readonly Dictionary<Microsoft.Xna.Framework.Point, long> _inFlightTileChanges = new();
+    private long _firstInFlightSnapshotId;
+    private long _lastInFlightSnapshotId;
+    private long _nextTileChangeVersion;
     private bool _initializedPalette;
     private WorldMap? _serverMapLookup;
     private int _nextChunk;
@@ -52,17 +56,48 @@ internal sealed class WorldMapScanner
     internal void MarkTileChanged(int x, int y)
     {
         if (x >= 0 && y >= 0 && x < Main.maxTilesX && y < Main.maxTilesY)
-            _pendingTileChanges.Add(new Microsoft.Xna.Framework.Point(x, y));
+            _pendingTileChanges[new Microsoft.Xna.Framework.Point(x, y)] = ++_nextTileChangeVersion;
     }
 
     internal bool HasPendingTileChanges => _pendingTileChanges.Count > 0;
 
-    internal object? CapturePendingTileChanges(int maximum)
+    internal bool HasUnacknowledgedTileChanges => _inFlightTileChanges.Count > 0;
+
+    internal void AcknowledgeTileChanges(long snapshotId)
     {
-        if (_pendingTileChanges.Count == 0 || maximum < 1)
+        // Every snapshot in this range carries the same in-flight batch. A later
+        // ACK is also proof that the Viewer applied at least one copy of it.
+        if (_inFlightTileChanges.Count == 0
+            || snapshotId < _firstInFlightSnapshotId
+            || snapshotId > _lastInFlightSnapshotId)
+            return;
+
+        foreach (var change in _inFlightTileChanges)
+        {
+            if (_pendingTileChanges.TryGetValue(change.Key, out var currentVersion)
+                && currentVersion == change.Value)
+                _pendingTileChanges.Remove(change.Key);
+        }
+        _inFlightTileChanges.Clear();
+        _firstInFlightSnapshotId = 0;
+        _lastInFlightSnapshotId = 0;
+    }
+
+    internal object? CapturePendingTileChanges(int maximum, long snapshotId)
+    {
+        if (maximum < 1)
             return null;
 
-        var points = _pendingTileChanges.Take(maximum).ToArray();
+        if (_inFlightTileChanges.Count == 0)
+        {
+            foreach (var change in _pendingTileChanges.Take(maximum))
+                _inFlightTileChanges[change.Key] = change.Value;
+        }
+        if (_inFlightTileChanges.Count == 0)
+            return null;
+
+        var changes = _inFlightTileChanges.ToArray();
+        var points = changes.Select(change => change.Key).ToArray();
         var originalMap = Main.Map;
         var bytes = new byte[checked(points.Length * 12)];
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -73,8 +108,26 @@ internal sealed class WorldMapScanner
             for (var index = 0; index < points.Length; index++)
             {
                 var point = points[index];
-                var mapTile = MapHelper.CreateMapTile(point.X, point.Y, byte.MaxValue);
-                var color = MapHelper.GetMapTileXnaColor(ref mapTile);
+                Microsoft.Xna.Framework.Color color;
+                try
+                {
+                    var mapTile = MapHelper.CreateMapTile(point.X, point.Y, byte.MaxValue);
+                    color = MapHelper.GetMapTileXnaColor(ref mapTile);
+                }
+                catch (IndexOutOfRangeException exception)
+                {
+                    // Match the full-world scanner fallback so one unavailable
+                    // modded palette entry cannot hold every later map edit hostage.
+                    color = Microsoft.Xna.Framework.Color.Black;
+                    if (!_loggedTileChangeWarning)
+                    {
+                        _loggedTileChangeWarning = true;
+                        var tile = Main.tile[point.X, point.Y];
+                        _mod.Logger.Warn(
+                            $"Could not render changed map tile ({point.X},{point.Y}), type={tile.TileType}, wall={tile.WallType}; using black fallback: {exception.Message}"
+                        );
+                    }
+                }
                 var tileInfo = _tileData.CaptureTile(point.X, point.Y);
                 var offset = index * 12;
                 WriteUInt16(bytes, offset, checked((ushort)point.X));
@@ -93,8 +146,12 @@ internal sealed class WorldMapScanner
             using (var zlib = new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true))
                 zlib.Write(bytes, 0, bytes.Length);
 
-            foreach (var point in points)
-                _pendingTileChanges.Remove(point);
+            // Keep the batch until the Viewer acknowledges a snapshot that
+            // contained it. The telemetry stream may replace older queued
+            // snapshots when a slow consumer falls behind.
+            if (_firstInFlightSnapshotId == 0)
+                _firstInFlightSnapshotId = snapshotId;
+            _lastInFlightSnapshotId = snapshotId;
 
             return new
             {
@@ -166,6 +223,9 @@ internal sealed class WorldMapScanner
             _failedTiles = 0;
             _pendingCaptures.Clear();
             _pendingTileChanges.Clear();
+            _inFlightTileChanges.Clear();
+            _firstInFlightSnapshotId = 0;
+            _lastInFlightSnapshotId = 0;
             _loggedScanStart = false;
             _loggedWarning = false;
         }

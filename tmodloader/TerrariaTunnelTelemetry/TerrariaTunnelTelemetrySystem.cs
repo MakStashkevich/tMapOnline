@@ -74,6 +74,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         On_WorldGen.KillTile += CaptureTileBreak;
         On_WorldGen.PlaceWall += CaptureWallPlacement;
         On_WorldGen.KillWall += CaptureWallBreak;
+        On_Liquid.NetSendLiquid += CaptureLiquidChange;
         On_Player.Teleport += CapturePlayerTeleport;
         On_Player.KillMe += CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly += OnServerTick;
@@ -93,6 +94,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         On_WorldGen.KillTile -= CaptureTileBreak;
         On_WorldGen.PlaceWall -= CaptureWallPlacement;
         On_WorldGen.KillWall -= CaptureWallBreak;
+        On_Liquid.NetSendLiquid -= CaptureLiquidChange;
         On_Player.Teleport -= CapturePlayerTeleport;
         On_Player.KillMe -= CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly -= OnServerTick;
@@ -153,6 +155,13 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             _mapScanner?.MarkTileChanged(i, j);
     }
 
+    private void CaptureLiquidChange(On_Liquid.orig_NetSendLiquid orig, int x, int y)
+    {
+        orig(x, y);
+        if (Main.netMode == NetmodeID.Server && !WorldGen.gen)
+            _mapScanner?.MarkTileChanged(x, y);
+    }
+
     private static bool InWorld(int x, int y) =>
         x >= 0 && y >= 0 && x < Main.maxTilesX && y < Main.maxTilesY;
 
@@ -162,6 +171,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             return;
 
         AcknowledgeDeliveredDeaths();
+        _mapScanner?.AcknowledgeTileChanges(_telemetryStream?.LastAcknowledgedSnapshotId ?? 0);
         RemoveExpiredPendingDeaths();
         _serverTickCount++;
         var playerPositionDue = _serverTickCount % _playerPositionIntervalTicks == 0;
@@ -452,8 +462,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 }
             },
             pylons = _cachedPylons,
-            baseMapTileUpdates = includeBaseMapTileUpdates
-                ? _mapScanner?.CapturePendingTileChanges(512)
+            baseMapTileUpdates = includeBaseMapTileUpdates || _mapScanner?.HasUnacknowledgedTileChanges == true
+                ? _mapScanner?.CapturePendingTileChanges(512, snapshotId)
                 : null,
             players = new
             {
