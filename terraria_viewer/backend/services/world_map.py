@@ -191,6 +191,8 @@ class WorldMapMixin(StoreMixinContract):
                         "online": is_online,
                         "team": record.get("team") if is_online else None,
                         "direction": record.get("direction") if is_online else None,
+                        "velocity": record.get("velocity") if is_online else None,
+                        "teleported": record.get("teleported", False) if is_online else False,
                         "session_seconds": session_seconds if is_online else None,
                         "position": record.get("position"),
                         "positions": [
@@ -301,8 +303,10 @@ class WorldMapMixin(StoreMixinContract):
                             "online": is_online,
                             "team": record.get("team") if is_online else None,
                             "direction": record.get("direction") if is_online else None,
+                            "teleported": record.get("teleported", False) if is_online else False,
                             "session_seconds": record.get("online_session_seconds") if is_online else None,
                             "position": record.get("position") if is_online else None,
+                            "velocity": record.get("velocity") if is_online else None,
                             "positions": positions,
                         })
                 for death in record.get("death_locations", []):

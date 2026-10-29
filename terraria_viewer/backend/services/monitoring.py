@@ -83,6 +83,7 @@ class MonitoringMixin(StoreMixinContract):
                         record.pop("direction", None)
                     else:
                         record["direction"] = player.direction
+                    record["teleported"] = player.teleported
                     if player.session_seconds is not None:
                         record["online_session_seconds"] = max(0, player.session_seconds)
                     appearance = player.appearance
@@ -103,10 +104,18 @@ class MonitoringMixin(StoreMixinContract):
                             player_id, name, record.get("appearance", {})
                         )
                         record["avatar_render_signature"] = self._appearance_signature(record.get("appearance", {}))
-                    position = (player.position.tile_x, player.position.tile_y) if player.position is not None else None
+                    position: tuple[int, int] | None = None
+                    if player.position is not None:
+                        position = (player.position.tile_x, player.position.tile_y)
+                        record["position"] = {
+                            **player.position.to_payload(),
+                            "updated_at": now,
+                        }
+                    if player.velocity is not None:
+                        record["velocity"] = player.velocity.to_payload()
+                    else:
+                        record.pop("velocity", None)
                     if position is not None:
-                        tile_x, tile_y = position
-                        record["position"] = {"tileX": tile_x, "tileY": tile_y, "updated_at": now}
                         self._record_player_movement(
                             player_id, name, uuid, position, world or {}, now, player.map_capture,
                             player.teleported,

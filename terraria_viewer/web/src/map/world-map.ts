@@ -640,6 +640,9 @@ const modules = await activateModules('world_map');
         player.position?.tileY,
         player.position?.x,
         player.position?.y,
+        player.velocity?.x,
+        player.velocity?.y,
+        player.teleported,
       ]),
     );
     if (nextMarkerKey !== markerKey) {

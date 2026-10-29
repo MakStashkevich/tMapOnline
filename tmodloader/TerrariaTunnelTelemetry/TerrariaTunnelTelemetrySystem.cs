@@ -292,8 +292,11 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 payload["position"] = new
                 {
                     tileX = (int)Math.Floor(player.position.X / 16.0),
-                    tileY = (int)Math.Floor(player.position.Y / 16.0)
+                    tileY = (int)Math.Floor(player.position.Y / 16.0),
+                    x = player.position.X / 16.0,
+                    y = player.position.Y / 16.0
                 };
+                payload["velocity"] = new { x = player.velocity.X, y = player.velocity.Y };
                 if (updateAppearance || !payload.ContainsKey("appearance"))
                     payload["appearance"] = PlayerAppearanceSnapshotBuilder.Capture(player);
                 if (teleported)

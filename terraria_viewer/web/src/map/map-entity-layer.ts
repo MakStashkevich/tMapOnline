@@ -24,17 +24,20 @@ type MapPlayerMarker = {
   team?: number | null;
   direction?: number | null;
   session_seconds?: number | null;
+  velocity?: { x?: number; y?: number } | null;
+  teleported?: boolean;
   position?: { tileX?: number; tileY?: number; x?: number; y?: number };
   positions?: Array<{ x: number; y: number; tileX?: number; tileY?: number }>;
 };
 type MapNpcMarker = {
-  id: number;
+  id: number | string;
   x: number;
   y: number;
   name?: string;
   boss?: boolean;
   icon_url?: string;
   direction?: number | null;
+  velocity?: { x?: number; y?: number } | null;
 };
 type MapCoinMarker = {
   id: number;
@@ -51,16 +54,32 @@ type MapDeathMarker = { id: string; name?: string; x: number; y: number; timesta
 // This is Terraria's native MapDeath texture, drawn directly without extra decoration.
 const DEATH_SPRITE = '/assets/map-death.png';
 
+type MarkerMotion = {
+  x: number;
+  y: number;
+  velocityX: number;
+  velocityY: number;
+  sampledAt: number;
+  element: HTMLElement | null;
+  spriteUrl: string;
+  direction: number | null | undefined;
+};
+
+const TERRARIA_TICKS_PER_SECOND = 60;
+const TERRARIA_PIXELS_PER_TILE = 16;
+const MAX_PREDICTION_SECONDS = 0.2;
+
 /** Renders map objects as DOM layers while keeping their sprite and fallback rules together. */
 export class MapEntityLayer {
   private world: MapEntityWorld = {};
   private spawnRenderKey = '';
-  private playerRenderVersion = 0;
-  private entityRenderVersion = 0;
   private coinRenderVersion = 0;
   private deathRenderVersion = 0;
   private pylonRenderVersion = 0;
   private spawnRenderVersion = 0;
+  private readonly playerMotions = new Map<string, MarkerMotion>();
+  private readonly entityMotions = new Map<string, MarkerMotion>();
+  private animationFrame: number | null = null;
 
   constructor(private readonly root: HTMLElement) {}
 
@@ -81,8 +100,8 @@ export class MapEntityLayer {
   markerPosition(player: MapPlayerMarker) {
     const position = player.position || player.positions?.at(-1);
     if (!position) return null;
-    const x = Number(position.tileX ?? position.x),
-      y = Number(position.tileY ?? position.y);
+    const x = Number(position.x ?? position.tileX),
+      y = Number(position.y ?? position.tileY);
     return Number.isFinite(x) &&
       Number.isFinite(y) &&
       x >= 0 &&
@@ -160,42 +179,68 @@ export class MapEntityLayer {
 
   drawMarkers(players: MapPlayerMarker[]) {
     const layer = this.layer('markers');
-    layer.replaceChildren();
-    const renderVersion = ++this.playerRenderVersion;
+    const activeIds = new Set<string>();
     for (const player of players) {
       const point = this.markerPosition(player);
-      if (!point) continue;
-      void this.appendPlayerMarker(layer, player, point, renderVersion);
+      if (!point || !player.avatar_url) continue;
+      activeIds.add(player.id);
+      let motion = this.playerMotions.get(player.id);
+      if (motion && motion.spriteUrl !== player.avatar_url) {
+        motion.element?.remove();
+        this.playerMotions.delete(player.id);
+        motion = undefined;
+      }
+      if (!motion) {
+        motion = this.createMotion(
+          point.x,
+          point.y,
+          player.velocity,
+          player.avatar_url,
+          player.direction,
+        );
+        this.playerMotions.set(player.id, motion);
+        void this.appendPlayerMarker(layer, player, motion);
+      } else {
+        const resetMotion =
+          player.teleported === true || this.isLargeJump(motion, point.x, point.y);
+        this.updateMotion(motion, point.x, point.y, player.velocity, resetMotion);
+        motion.direction = player.direction;
+        this.updateMarkerDirection(motion.element, 'player-head-sprite', player.direction === -1);
+      }
     }
+    for (const [id, motion] of this.playerMotions) {
+      if (!activeIds.has(id)) {
+        motion.element?.remove();
+        this.playerMotions.delete(id);
+      }
+    }
+    this.ensureAnimationFrame();
   }
 
   private async appendPlayerMarker(
     layer: HTMLElement,
     player: MapPlayerMarker,
-    point: { x: number; y: number },
-    renderVersion: number,
+    motion: MarkerMotion,
   ): Promise<void> {
-    if (!player.avatar_url) return;
-    const source = await loadSprite(player.avatar_url);
-    if (!source || renderVersion !== this.playerRenderVersion) return;
+    const source = await loadSprite(motion.spriteUrl);
+    if (!source || this.playerMotions.get(player.id) !== motion) return;
     const sprite = createOutlinedSprite(source, playerOutlineColor(player.team));
     if (!sprite) return;
 
     const marker = document.createElement('div');
     marker.className = 'player-marker';
-    marker.style.left = `${(point.x / this.world.width) * 100}%`;
-    marker.style.top = `${(point.y / this.world.height) * 100}%`;
     marker.setAttribute('aria-label', `Игрок ${player.name || 'без имени'}`);
     sprite.className = 'player-head-sprite';
     if (player.direction === -1) sprite.classList.add('facing-left');
     marker.append(sprite);
     layer.append(marker);
+    motion.element = marker;
+    this.positionMarker(marker, motion.x, motion.y);
   }
 
   drawEntities(entities: MapNpcMarker[]) {
     const layer = this.layer('entities');
-    layer.replaceChildren();
-    const renderVersion = ++this.entityRenderVersion;
+    const activeIds = new Set<string>();
     for (const entity of entities || []) {
       const x = Number(entity.x),
         y = Number(entity.y);
@@ -209,31 +254,139 @@ export class MapEntityLayer {
         !entity.icon_url
       )
         continue;
-      void this.appendEntityMarker(layer, entity, x, y, renderVersion);
+      const id = String(entity.id);
+      activeIds.add(id);
+      let motion = this.entityMotions.get(id);
+      if (motion && motion.spriteUrl !== entity.icon_url) {
+        motion.element?.remove();
+        this.entityMotions.delete(id);
+        motion = undefined;
+      }
+      if (!motion) {
+        motion = this.createMotion(x, y, entity.velocity, entity.icon_url, entity.direction);
+        this.entityMotions.set(id, motion);
+        void this.appendEntityMarker(layer, entity, motion);
+      } else {
+        this.updateMotion(motion, x, y, entity.velocity, this.isLargeJump(motion, x, y));
+        motion.direction = entity.direction;
+        this.updateMarkerDirection(motion.element, 'entity-head-sprite', entity.direction === 1);
+      }
     }
+    for (const [id, motion] of this.entityMotions) {
+      if (!activeIds.has(id)) {
+        motion.element?.remove();
+        this.entityMotions.delete(id);
+      }
+    }
+    this.ensureAnimationFrame();
   }
 
   private async appendEntityMarker(
     layer: HTMLElement,
     entity: MapNpcMarker,
-    x: number,
-    y: number,
-    renderVersion: number,
+    motion: MarkerMotion,
   ): Promise<void> {
-    const source = await loadSprite(entity.icon_url || '');
-    if (!source || renderVersion !== this.entityRenderVersion) return;
+    const source = await loadSprite(motion.spriteUrl);
+    const id = String(entity.id);
+    if (!source || this.entityMotions.get(id) !== motion) return;
     const sprite = createOutlinedSprite(source, '#ffffff');
     if (!sprite) return;
     const marker = document.createElement('div');
     marker.className = `entity-marker${entity.boss ? ' boss' : ''}`;
-    marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
-    marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
     marker.title = entity.name || (entity.boss ? 'Босс' : 'NPC');
     sprite.className = 'entity-head-sprite';
     // Terraria draws NPC sprites flipped when spriteDirection is 1.
     if (entity.direction === 1) sprite.classList.add('facing-left');
     marker.append(sprite);
     layer.append(marker);
+    motion.element = marker;
+    this.positionMarker(marker, motion.x, motion.y);
+  }
+
+  private createMotion(
+    x: number,
+    y: number,
+    velocity: { x?: number; y?: number } | null | undefined,
+    spriteUrl: string,
+    direction: number | null | undefined,
+  ): MarkerMotion {
+    return {
+      x,
+      y,
+      velocityX: Number(velocity?.x) || 0,
+      velocityY: Number(velocity?.y) || 0,
+      sampledAt: performance.now(),
+      element: null,
+      spriteUrl,
+      direction,
+    };
+  }
+
+  private updateMotion(
+    motion: MarkerMotion,
+    x: number,
+    y: number,
+    velocity: { x?: number; y?: number } | null | undefined,
+    snap: boolean,
+  ): void {
+    // Samples are authoritative; velocity only predicts between server updates.
+    motion.x = x;
+    motion.y = y;
+    motion.velocityX = snap ? 0 : Number(velocity?.x) || 0;
+    motion.velocityY = snap ? 0 : Number(velocity?.y) || 0;
+    motion.sampledAt = performance.now();
+    if (motion.element) this.positionMarker(motion.element, x, y);
+  }
+
+  private isLargeJump(motion: MarkerMotion, x: number, y: number): boolean {
+    const predicted = this.predictedPosition(motion, performance.now());
+    return Math.hypot(x - predicted.x, y - predicted.y) > 48;
+  }
+
+  private predictedPosition(motion: MarkerMotion, now: number): { x: number; y: number } {
+    const elapsedSeconds = Math.min(
+      Math.max(0, (now - motion.sampledAt) / 1000),
+      MAX_PREDICTION_SECONDS,
+    );
+    const tilesPerSecond = TERRARIA_TICKS_PER_SECOND / TERRARIA_PIXELS_PER_TILE;
+    return {
+      x: motion.x + motion.velocityX * tilesPerSecond * elapsedSeconds,
+      y: motion.y + motion.velocityY * tilesPerSecond * elapsedSeconds,
+    };
+  }
+
+  private positionMarker(marker: HTMLElement, x: number, y: number): void {
+    marker.style.left = `${(x / Number(this.world.width || 1)) * 100}%`;
+    marker.style.top = `${(y / Number(this.world.height || 1)) * 100}%`;
+  }
+
+  private updateMarkerDirection(
+    marker: HTMLElement | null,
+    spriteClass: string,
+    facingLeft: boolean,
+  ): void {
+    const sprite = marker?.querySelector<HTMLElement>(`.${spriteClass}`);
+    sprite?.classList.toggle('facing-left', facingLeft);
+  }
+
+  private ensureAnimationFrame(): void {
+    if (this.animationFrame !== null) return;
+    this.animationFrame = requestAnimationFrame((now) => this.animateMarkers(now));
+  }
+
+  private animateMarkers(now: number): void {
+    this.animationFrame = null;
+    let hasRecentMovement = false;
+    for (const motion of [...this.playerMotions.values(), ...this.entityMotions.values()]) {
+      if (!motion.element) continue;
+      const age = (now - motion.sampledAt) / 1000;
+      const point = this.predictedPosition(motion, now);
+      this.positionMarker(motion.element, point.x, point.y);
+      if (age < MAX_PREDICTION_SECONDS && (motion.velocityX !== 0 || motion.velocityY !== 0)) {
+        hasRecentMovement = true;
+      }
+    }
+    if (hasRecentMovement) this.ensureAnimationFrame();
   }
 
   drawDroppedCoins(coins: MapCoinMarker[]) {

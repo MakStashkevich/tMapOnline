@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import math
 from typing import Any, cast
 
 
@@ -25,9 +26,10 @@ def _integer_or(value: Any, fallback: int) -> int:
 
 def _number(value: Any) -> float | None:
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError, OverflowError):
         return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _optional_object(value: Any) -> dict[str, Any] | None:
@@ -40,6 +42,8 @@ class TilePosition:
 
     tile_x: int
     tile_y: int
+    world_x: float | None = None
+    world_y: float | None = None
 
     @classmethod
     def from_payload(cls, value: Any) -> TilePosition | None:
@@ -48,10 +52,39 @@ class TilePosition:
         tile_y = _integer(raw.get("tileY"))
         if tile_x is None or tile_y is None or tile_x < 0 or tile_y < 0:
             return None
-        return cls(tile_x, tile_y)
+        world_x = _number(raw.get("x"))
+        world_y = _number(raw.get("y"))
+        if world_x is None or world_y is None:
+            world_x = float(tile_x)
+            world_y = float(tile_y)
+        return cls(tile_x, tile_y, world_x, world_y)
 
-    def to_payload(self) -> dict[str, int]:
-        return {"tileX": self.tile_x, "tileY": self.tile_y}
+    def to_payload(self) -> dict[str, int | float]:
+        return {
+            "tileX": self.tile_x,
+            "tileY": self.tile_y,
+            "x": self.world_x if self.world_x is not None else float(self.tile_x),
+            "y": self.world_y if self.world_y is not None else float(self.tile_y),
+        }
+
+
+@dataclass(frozen=True)
+class Velocity:
+    """Terraria world velocity in pixels per game update."""
+
+    x: float
+    y: float
+
+    @classmethod
+    def from_payload(cls, value: Any) -> Velocity | None:
+        raw = _object(value)
+        x, y = _number(raw.get("x")), _number(raw.get("y"))
+        if x is None or y is None or abs(x) > 1000 or abs(y) > 1000:
+            return None
+        return cls(x, y)
+
+    def to_payload(self) -> dict[str, float]:
+        return {"x": self.x, "y": self.y}
 
 
 @dataclass(frozen=True)
@@ -68,6 +101,7 @@ class PlayerSnapshot:
     appearance: dict[str, Any] | None
     team: int | None
     direction: int | None
+    velocity: Velocity | None = None
 
     @classmethod
     def from_payload(cls, value: Any) -> PlayerSnapshot | None:
@@ -95,6 +129,7 @@ class PlayerSnapshot:
                 if (direction := _integer(raw.get("direction"))) in (-1, 1)
                 else None
             ),
+            velocity=Velocity.from_payload(raw.get("velocity")),
         )
 
     def to_store_payload(self) -> dict[str, Any]:
@@ -110,6 +145,7 @@ class PlayerSnapshot:
             "appearance": self.appearance,
             "team": self.team,
             "direction": self.direction,
+            "velocity": self.velocity.to_payload() if self.velocity is not None else None,
         }
 
 
@@ -131,6 +167,9 @@ class NpcEntity:
     head_texture: str
     direction: int | None
     icon_url: str | None = None
+    world_x: float | None = None
+    world_y: float | None = None
+    velocity: Velocity | None = None
 
     @classmethod
     def from_payload(cls, value: Any) -> NpcEntity | None:
@@ -160,6 +199,9 @@ class NpcEntity:
                 if (direction := _integer(raw.get("direction"))) in (-1, 1)
                 else None
             ),
+            world_x=_number(raw.get("x")),
+            world_y=_number(raw.get("y")),
+            velocity=Velocity.from_payload(raw.get("velocity")),
         )
 
     def with_icon(self, icon_url: str | None) -> NpcEntity:
@@ -168,8 +210,12 @@ class NpcEntity:
     def to_payload(self) -> dict[str, Any]:
         return {
             "id": self.entity_id, "type": self.npc_type, "name": self.name,
-            "boss": self.is_boss, "x": self.tile_x, "y": self.tile_y,
-            "direction": self.direction, "icon_url": self.icon_url,
+            "boss": self.is_boss,
+            "x": self.world_x if self.world_x is not None else float(self.tile_x),
+            "y": self.world_y if self.world_y is not None else float(self.tile_y),
+            "direction": self.direction,
+            "velocity": self.velocity.to_payload() if self.velocity is not None else None,
+            "icon_url": self.icon_url,
         }
 
 
