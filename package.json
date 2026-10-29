@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node tools/build-web.mjs",
     "typecheck": "tsc --noEmit",
+    "test:web": "node --experimental-transform-types --test tests/web/*.test.mjs",
     "check:python": "pyright",
     "check:format": "prettier --check \"terraria_viewer/web/src/**/*.{ts,scss}\" \"terraria_viewer/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",
     "format": "prettier --write \"terraria_viewer/web/src/**/*.{ts,scss}\" \"terraria_viewer/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",

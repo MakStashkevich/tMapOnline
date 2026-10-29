@@ -1,4 +1,7 @@
+import { MapTileBitmapCache } from './map-tile-bitmap-cache';
+
 type WorldSize = { id: string | number; width: number; height: number };
+type MapTile = { x: number; y: number; key: string };
 
 type PyramidLayerOptions = {
   layer: HTMLElement;
@@ -12,6 +15,7 @@ type PyramidLayerOptions = {
 const TILE_SIZE = 256;
 const MAX_LEVEL = 8;
 const MAX_VISIBLE_TILES = 10;
+const MAX_CACHED_BITMAPS = 16;
 const TILE_RENDER_DEBOUNCE_MS = 45;
 const TILE_RENDER_BATCH_SIZE = 4;
 
@@ -23,12 +27,12 @@ function isCanvasContextLost(context: CanvasRenderingContext2D): boolean {
 /** Fetches only map pyramid tiles intersecting the current viewport. */
 export class MapPyramidLayerRenderer {
   private readonly canvases = new Map<string, HTMLCanvasElement>();
+  private readonly bitmapCache = new MapTileBitmapCache(MAX_CACHED_BITMAPS);
   private readonly invalidatedTiles = new Set<string>();
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
   private renderRunning = false;
   private renderPending = false;
   private renderVersion = 0;
-  private renderAbortController: AbortController | null = null;
   private lastRenderDurationMs = 0;
   private lastRenderTileCount = 0;
   private failedRenderCount = 0;
@@ -46,21 +50,19 @@ export class MapPyramidLayerRenderer {
 
   requestRender(): void {
     if (this.renderTimer) clearTimeout(this.renderTimer);
-    this.renderAbortController?.abort();
     this.renderVersion++;
     this.renderTimer = setTimeout(() => void this.renderLatestViewport(), TILE_RENDER_DEBOUNCE_MS);
   }
 
   clear(): void {
     this.renderVersion++;
-    this.renderAbortController?.abort();
-    this.renderAbortController = null;
     if (this.renderTimer) clearTimeout(this.renderTimer);
     this.renderTimer = null;
     this.renderPending = false;
     for (const canvas of this.canvases.values()) canvas.remove();
     this.canvases.clear();
     this.invalidatedTiles.clear();
+    this.bitmapCache.clear();
   }
 
   invalidateMapTiles(points: Array<{ x: number; y: number }>): void {
@@ -75,7 +77,10 @@ export class MapPyramidLayerRenderer {
       }
     }
 
-    for (const address of affected) this.invalidatedTiles.add(address);
+    for (const address of affected) {
+      this.invalidatedTiles.add(address);
+      this.bitmapCache.invalidate(address);
+    }
     this.requestRender();
   }
 
@@ -92,10 +97,18 @@ export class MapPyramidLayerRenderer {
     const affected = new Set<string>();
     for (let y = firstY; y < lastY; y += 1) {
       for (let x = firstX; x < lastX; x += 1) {
-        affected.add(`${world.id}:${level}:${x}:${y}`);
+        for (let ancestorLevel = level; ancestorLevel <= MAX_LEVEL; ancestorLevel += 1) {
+          const difference = ancestorLevel - level;
+          affected.add(
+            `${world.id}:${ancestorLevel}:${Math.floor(x / (1 << difference))}:${Math.floor(y / (1 << difference))}`,
+          );
+        }
       }
     }
-    for (const address of affected) this.invalidatedTiles.add(address);
+    for (const address of affected) {
+      this.invalidatedTiles.add(address);
+      this.bitmapCache.invalidate(address);
+    }
     this.requestRender();
   }
 
@@ -117,7 +130,7 @@ export class MapPyramidLayerRenderer {
       lastRenderChunkCount: this.lastRenderTileCount,
       rendering: this.renderRunning,
       canvasBytes,
-      decodedChunkCount: 0,
+      decodedChunkCount: this.bitmapCache.size,
     };
   }
 
@@ -161,7 +174,7 @@ export class MapPyramidLayerRenderer {
       Math.ceil(world.height / tileWorldSize),
       Math.ceil(visibleBounds.bottom / tileWorldSize),
     );
-    const tiles: Array<{ x: number; y: number; key: string }> = [];
+    const tiles: MapTile[] = [];
 
     for (let y = firstY; y < lastY; y++) {
       for (let x = firstX; x < lastX; x++) {
@@ -172,135 +185,145 @@ export class MapPyramidLayerRenderer {
     if (tiles.length === 0) return;
     this.lastRenderTileCount = tiles.length;
 
-    const abortController = new AbortController();
-    this.renderAbortController = abortController;
-    const loadedTiles = new Map<string, ImageBitmap>();
-    let failedTiles = false;
-    for (let start = 0; start < tiles.length; start += TILE_RENDER_BATCH_SIZE) {
-      if (version !== this.renderVersion) {
-        this.closeBitmaps(loadedTiles);
-        return;
-      }
-      const tilesToLoad = tiles.slice(start, start + TILE_RENDER_BATCH_SIZE).filter(({ key }) => {
-        return !this.canvases.has(key) || this.invalidatedTiles.has(key);
-      });
-      const results = await Promise.allSettled(
-        tilesToLoad.map(async (tile) => ({
-          tile,
-          bitmap: await this.loadTileBitmap(
-            world,
-            level,
-            tile.x,
-            tile.y,
-            version,
-            abortController.signal,
-          ),
-        })),
-      );
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          loadedTiles.set(result.value.tile.key, result.value.bitmap);
-        } else if (!abortController.signal.aborted) {
-          failedTiles = true;
-        }
-      }
-      if (version !== this.renderVersion) {
-        this.closeBitmaps(loadedTiles);
-        return;
-      }
-      if (start + TILE_RENDER_BATCH_SIZE < tiles.length) await this.nextFrame();
+    const desiredTileKeys = new Set(tiles.map(({ key }) => key));
+    const needsNewDetailTiles = tiles.some(
+      ({ key }) => !this.canvases.has(key) || this.invalidatedTiles.has(key),
+    );
+    if (!needsNewDetailTiles) {
+      this.removeCanvasesOutside(desiredTileKeys);
+      return;
     }
 
-    if (version !== this.renderVersion || abortController.signal.aborted) {
-      this.closeBitmaps(loadedTiles);
-      return;
-    }
-    // Keep the previous viewport intact unless every replacement tile is ready.
-    if (
-      failedTiles ||
-      loadedTiles.size +
-        tiles.filter(({ key }) => this.canvases.has(key) && !this.invalidatedTiles.has(key))
-          .length !==
-        tiles.length
-    ) {
-      this.closeBitmaps(loadedTiles);
-      this.failedRenderCount++;
-      if (this.failedRenderCount === 3) {
-        this.options.onError(
-          new Error('Несколько фрагментов карты не загрузились. Повторяю загрузку.'),
-        );
+    // Load one coarser level first. It covers new view areas while sharp tiles arrive.
+    if (level < MAX_LEVEL) {
+      const fallbackTiles = this.parentTilesFor(tiles, world.id, level + 1);
+      const fallback = await this.loadTileBitmaps(fallbackTiles, world, level + 1, version);
+      if (version !== this.renderVersion) return;
+
+      const fallbackCanvases = this.createTileCanvases(
+        fallbackTiles,
+        fallback.bitmaps,
+        TILE_SIZE * (1 << (level + 1)),
+        level + 1,
+      );
+      if (!fallbackCanvases) {
+        this.scheduleRetry();
+        return;
       }
-      this.renderTimer = setTimeout(() => this.requestRender(), 1200);
-      return;
+      this.installTileCanvases(fallbackCanvases);
+      this.removeCanvasesOutside(
+        new Set([...desiredTileKeys, ...fallbackTiles.map(({ key }) => key)]),
+      );
+      if (fallback.failed) this.scheduleRetry();
     }
-    if (!this.commitTileSet(tiles, loadedTiles, tileWorldSize, version)) {
+
+    const prioritizedTiles = [...tiles].sort((left, right) => {
+      const leftDistance = Math.hypot(
+        left.x + 0.5 - (firstX + lastX) / 2,
+        left.y + 0.5 - (firstY + lastY) / 2,
+      );
+      const rightDistance = Math.hypot(
+        right.x + 0.5 - (firstX + lastX) / 2,
+        right.y + 0.5 - (firstY + lastY) / 2,
+      );
+      return leftDistance - rightDistance;
+    });
+
+    let failedTiles = false;
+    for (let start = 0; start < prioritizedTiles.length; start += TILE_RENDER_BATCH_SIZE) {
+      if (version !== this.renderVersion) return;
+
+      const batch = prioritizedTiles.slice(start, start + TILE_RENDER_BATCH_SIZE);
+      const result = await this.loadTileBitmaps(batch, world, level, version);
+      if (version !== this.renderVersion) return;
+
+      const canvases = this.createTileCanvases(batch, result.bitmaps, tileWorldSize, level);
+      if (!canvases) {
+        failedTiles = true;
+      } else {
+        this.installTileCanvases(canvases);
+      }
+      failedTiles ||= result.failed;
+      this.removeCoveredFallbackTiles(tiles, level);
+      this.removeCanvasesOutside(this.getRequiredTileKeys(tiles, level));
+
+      if (start + TILE_RENDER_BATCH_SIZE < prioritizedTiles.length) await this.nextFrame();
+    }
+
+    if (failedTiles) {
       this.scheduleRetry();
       return;
     }
     this.failedRenderCount = 0;
   }
 
-  private async loadTileBitmap(
-    world: WorldSize,
-    level: number,
-    tileX: number,
-    tileY: number,
-    version: number,
-    signal: AbortSignal,
-  ): Promise<ImageBitmap> {
-    if (version !== this.renderVersion) throw new Error('Map tile request was superseded.');
-
-    const query = new URLSearchParams({
-      world: String(world.id),
-      level: String(level),
-      x: String(tileX),
-      y: String(tileY),
-    });
-    let bitmap: ImageBitmap;
-    try {
-      const response = await this.fetchTile(query, version, signal);
-      bitmap = await createImageBitmap(await response.blob());
-    } catch (error) {
-      throw error;
+  private parentTilesFor(tiles: MapTile[], worldId: string | number, level: number): MapTile[] {
+    const parents = new Map<string, MapTile>();
+    for (const tile of tiles) {
+      const x = Math.floor(tile.x / 2);
+      const y = Math.floor(tile.y / 2);
+      const key = `${worldId}:${level}:${x}:${y}`;
+      parents.set(key, { x, y, key });
     }
-    if (version !== this.renderVersion) {
-      bitmap.close();
-      throw new Error('Map tile request was superseded.');
-    }
-    return bitmap;
+    return [...parents.values()];
   }
 
-  private commitTileSet(
-    tiles: Array<{ x: number; y: number; key: string }>,
-    loadedTiles: Map<string, ImageBitmap>,
-    tileWorldSize: number,
+  private async loadTileBitmaps(
+    tiles: MapTile[],
+    world: WorldSize,
+    level: number,
     version: number,
-  ): boolean {
-    const nextCanvases = new Map<string, HTMLCanvasElement>();
-    const stagedCanvases: HTMLCanvasElement[] = [];
+  ): Promise<{ bitmaps: Map<string, ImageBitmap>; failed: boolean }> {
+    const bitmaps = new Map<string, ImageBitmap>();
+    let failed = false;
 
+    for (let start = 0; start < tiles.length; start += TILE_RENDER_BATCH_SIZE) {
+      if (version !== this.renderVersion) return { bitmaps, failed };
+
+      const requestedTiles = tiles
+        .slice(start, start + TILE_RENDER_BATCH_SIZE)
+        .filter(({ key }) => !this.canvases.has(key) || this.invalidatedTiles.has(key));
+      const results = await Promise.allSettled(
+        requestedTiles.map(async (tile) => ({
+          tile,
+          bitmap: await this.bitmapCache.getOrLoad(tile.key, () =>
+            this.loadTileBitmap(world, level, tile.x, tile.y),
+          ),
+        })),
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') bitmaps.set(result.value.tile.key, result.value.bitmap);
+        else failed = true;
+      }
+
+      if (start + TILE_RENDER_BATCH_SIZE < tiles.length) await this.nextFrame();
+    }
+
+    return { bitmaps, failed };
+  }
+
+  private createTileCanvases(
+    tiles: MapTile[],
+    bitmaps: Map<string, ImageBitmap>,
+    tileWorldSize: number,
+    level: number,
+  ): Map<string, HTMLCanvasElement> | null {
+    const canvases = new Map<string, HTMLCanvasElement>();
     try {
       for (const tile of tiles) {
-        if (version !== this.renderVersion) return false;
+        const bitmap = bitmaps.get(tile.key);
+        if (!bitmap) continue;
 
-        const retainedCanvas = this.canvases.get(tile.key);
-        const bitmap = loadedTiles.get(tile.key);
-        if (retainedCanvas && !bitmap) {
-          nextCanvases.set(tile.key, retainedCanvas);
-          continue;
-        }
-        if (!bitmap) return false;
-
-        // Render replacements off-screen so a failed Safari context never clears a visible tile.
         const canvas = document.createElement('canvas');
         canvas.width = bitmap.width;
         canvas.height = bitmap.height;
         const context = canvas.getContext('2d');
-        if (!context || isCanvasContextLost(context)) return false;
+        if (!context || isCanvasContextLost(context)) return null;
 
         context.imageSmoothingEnabled = false;
         context.drawImage(bitmap, 0, 0);
-        if (isCanvasContextLost(context)) return false;
+        if (isCanvasContextLost(context)) return null;
 
         canvas.className = 'map-pyramid-tile';
         canvas.dataset.worldLeft = String(tile.x * tileWorldSize);
@@ -308,6 +331,7 @@ export class MapPyramidLayerRenderer {
         canvas.dataset.tileAddress = tile.key;
         canvas.dataset.worldWidth = String(canvas.width * (tileWorldSize / TILE_SIZE));
         canvas.dataset.worldHeight = String(canvas.height * (tileWorldSize / TILE_SIZE));
+        canvas.style.zIndex = String(MAX_LEVEL - level);
         canvas.addEventListener('contextlost', (event) => {
           event.preventDefault();
           if (this.canvases.get(tile.key) !== canvas) return;
@@ -315,38 +339,80 @@ export class MapPyramidLayerRenderer {
           this.invalidatedTiles.add(tile.key);
           this.requestRender();
         });
-        stagedCanvases.push(canvas);
-        nextCanvases.set(tile.key, canvas);
+        canvases.set(tile.key, canvas);
       }
     } catch {
-      // Keep the previous complete tile set and retry instead of exposing a blank canvas.
-      return false;
-    } finally {
-      this.closeBitmaps(loadedTiles);
+      return null;
     }
 
-    if (version !== this.renderVersion) {
-      for (const canvas of stagedCanvases) canvas.remove();
-      return false;
-    }
-    for (const canvas of stagedCanvases) {
-      const context = canvas.getContext('2d');
-      if (!context || isCanvasContextLost(context)) return false;
-    }
+    return canvases;
+  }
 
-    for (const canvas of this.canvases.values()) {
-      if (!nextCanvases.has(canvas.dataset.tileAddress || '')) canvas.remove();
-    }
-    for (const canvas of nextCanvases.values()) {
+  private installTileCanvases(canvases: Map<string, HTMLCanvasElement>): void {
+    for (const [key, canvas] of canvases) {
+      const previousCanvas = this.canvases.get(key);
       if (!canvas.isConnected) this.options.layer.append(canvas);
       this.positionCanvas(canvas, this.options.getScale());
+      this.canvases.set(key, canvas);
+      previousCanvas?.remove();
+      this.invalidatedTiles.delete(key);
     }
-    this.canvases.clear();
-    for (const [key, canvas] of nextCanvases) this.canvases.set(key, canvas);
-    for (const canvas of stagedCanvases) {
-      this.invalidatedTiles.delete(canvas.dataset.tileAddress || '');
+  }
+
+  private removeCoveredFallbackTiles(tiles: MapTile[], level: number): void {
+    if (level >= MAX_LEVEL) return;
+
+    const childrenByParent = new Map<string, string[]>();
+    for (const tile of tiles) {
+      const parentKey = `${this.options.getWorld()?.id ?? ''}:${level + 1}:${Math.floor(tile.x / 2)}:${Math.floor(tile.y / 2)}`;
+      const childKeys = childrenByParent.get(parentKey) || [];
+      childKeys.push(tile.key);
+      childrenByParent.set(parentKey, childKeys);
     }
-    return true;
+
+    for (const [parentKey, childKeys] of childrenByParent) {
+      if (!childKeys.every((key) => this.canvases.has(key) && !this.invalidatedTiles.has(key)))
+        continue;
+      this.canvases.get(parentKey)?.remove();
+      this.canvases.delete(parentKey);
+    }
+  }
+
+  private getRequiredTileKeys(tiles: MapTile[], level: number): Set<string> {
+    const required = new Set(tiles.map(({ key }) => key));
+    if (level >= MAX_LEVEL) return required;
+
+    const worldId = this.options.getWorld()?.id ?? '';
+    for (const tile of tiles) {
+      const parentKey = `${worldId}:${level + 1}:${Math.floor(tile.x / 2)}:${Math.floor(tile.y / 2)}`;
+      if (!this.canvases.has(tile.key) || this.invalidatedTiles.has(tile.key))
+        required.add(parentKey);
+    }
+    return required;
+  }
+
+  private removeCanvasesOutside(requiredKeys: Set<string>): void {
+    for (const [key, canvas] of this.canvases) {
+      if (requiredKeys.has(key)) continue;
+      canvas.remove();
+      this.canvases.delete(key);
+    }
+  }
+
+  private async loadTileBitmap(
+    world: WorldSize,
+    level: number,
+    tileX: number,
+    tileY: number,
+  ): Promise<ImageBitmap> {
+    const query = new URLSearchParams({
+      world: String(world.id),
+      level: String(level),
+      x: String(tileX),
+      y: String(tileY),
+    });
+    const response = await this.fetchTile(query);
+    return createImageBitmap(await response.blob());
   }
 
   private scheduleRetry(): void {
@@ -358,29 +424,18 @@ export class MapPyramidLayerRenderer {
     this.renderTimer = setTimeout(() => this.requestRender(), 1200);
   }
 
-  private closeBitmaps(bitmaps: Map<string, ImageBitmap>): void {
-    for (const bitmap of bitmaps.values()) bitmap.close();
-    bitmaps.clear();
-  }
-
-  private async fetchTile(
-    query: URLSearchParams,
-    version: number,
-    signal: AbortSignal,
-  ): Promise<Response> {
+  private async fetchTile(query: URLSearchParams): Promise<Response> {
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (version !== this.renderVersion) throw new Error('Map tile request was superseded.');
       try {
         // Let the browser validate its ETag cache instead of forcing an uncached download.
-        const response = await fetch(`/api/world-map/tile?${query}`, { cache: 'default', signal });
+        const response = await fetch(`/api/world-map/tile?${query}`, { cache: 'default' });
         if (response.ok) return response;
         if (response.status < 500 && response.status !== 429) {
           throw new Error(`Map tile request failed with HTTP ${response.status}`);
         }
         lastError = new Error(`Map tile request failed with HTTP ${response.status}`);
       } catch (error) {
-        if (signal.aborted) throw error;
         lastError = error;
       }
       if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
