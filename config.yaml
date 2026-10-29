@@ -17,7 +17,14 @@ storage:
   death_retention_seconds: 3600
 
 telemetry:
-  snapshot_interval_ticks: 1
+  player_position_interval_ticks: 1
+  entity_interval_ticks: 1
+  map_capture_interval_ticks: 30
+  map_tile_update_interval_ticks: 1
+  world_scan_interval_ticks: 1
+  browser_live_poll_interval_ms: 100
+  browser_map_poll_interval_ms: 5000
+  browser_debug_poll_interval_ms: 1000
 
 tunnel_status_file: ~/Library/Application Support/TerrariaTunnel/tunnel-status.json
 

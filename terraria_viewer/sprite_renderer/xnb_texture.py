@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image
@@ -70,6 +71,14 @@ class XnbTextureReader:
         """Load a PNG directly or parse one supported XNB Texture2D asset."""
         if not path.is_file():
             raise FileNotFoundError(f"Missing Terraria texture: {path.name}")
+        stat = path.stat()
+        return self._read_cached(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+
+    @lru_cache(maxsize=64)
+    def _read_cached(self, path_string: str, modified_ns: int, size_bytes: int) -> TerrariaTexture:
+        """Reuse decoded textures, invalidating entries when a source file changes."""
+        del modified_ns, size_bytes
+        path = Path(path_string)
         if path.suffix.lower() == ".png":
             with Image.open(path) as image:
                 rgba = image.convert("RGBA")

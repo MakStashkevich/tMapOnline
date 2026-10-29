@@ -114,14 +114,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(404, b"tile details not available\n", "text/plain; charset=utf-8")
             else:
                 self._send(200, json.dumps(tile, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", cache_control="no-store")
-        elif path == "/api/world-map":
-            world_id = parse_qs(request.query).get("world", [None])[0]
+        elif path == "/api/world-map/live":
+            params = parse_qs(request.query)
+            world_id = params.get("world", [None])[0]
             try:
-                since = max(0.0, float(parse_qs(request.query).get("since", ["0"])[0]))
+                since = max(0.0, float(params.get("since", ["0"])[0]))
             except (TypeError, ValueError):
                 since = 0.0
-            body = json.dumps(self.store.world_map(world_id, since), ensure_ascii=False).encode("utf-8")
-            self._send(200, body, "application/json; charset=utf-8")
+            try:
+                map_since = max(0, int(params.get("map_since", ["0"])[0]))
+            except (TypeError, ValueError):
+                map_since = 0
+            body = json.dumps(
+                self.store.world_map_live(world_id, since, map_since), ensure_ascii=False
+            ).encode("utf-8")
+            self._send(200, body, "application/json; charset=utf-8", cache_control="no-store")
+        elif path == "/api/world-map":
+            params = parse_qs(request.query)
+            world_id = params.get("world", [None])[0]
+            try:
+                since = max(0.0, float(params.get("since", ["0"])[0]))
+            except (TypeError, ValueError):
+                since = 0.0
+            try:
+                live_since = max(0.0, float(params.get("live_since", ["0"])[0]))
+            except (TypeError, ValueError):
+                live_since = 0.0
+            body = json.dumps(self.store.world_map(world_id, since, live_since), ensure_ascii=False).encode("utf-8")
+            self._send(200, body, "application/json; charset=utf-8", cache_control="no-store")
         elif path == "/api/world-map/exploration":
             params = parse_qs(request.query)
             player_id = params.get("id", [""])[0]

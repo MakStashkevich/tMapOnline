@@ -144,7 +144,8 @@ class MonitoringMixin(StoreMixinContract):
                         sessions[-1]["ended_at"] = now
                         record["last_seen_at"] = sessions[-1].get("last_seen_at", now)
                 self._online_player_ids = sorted(seen_ids)
-                self._save_players_locked()
+                if time.monotonic() - self._players_last_saved_monotonic >= 1.0:
+                    self._save_players_locked()
             self._updated_at = now
 
     def update(

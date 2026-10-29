@@ -14,6 +14,7 @@ from ..store_common import (
     hashlib,
     json,
     math,
+    struct,
     time,
     zlib,
 )
@@ -108,6 +109,12 @@ class MovementMixin(StoreMixinContract):
             json.dumps(self._movement_cache[player_id], ensure_ascii=False, indent=2), encoding="utf-8"
         )
         temporary.replace(path)
+        self._movement_last_saved_at[player_id] = time.monotonic()
+
+    def _save_movement_if_due(self, player_id: str) -> None:
+        last_saved = self._movement_last_saved_at.get(player_id, 0.0)
+        if time.monotonic() - last_saved >= 1.0:
+            self._save_movement(player_id)
 
     def _load_world_map_cache(self) -> None:
         try:
@@ -208,7 +215,7 @@ class MovementMixin(StoreMixinContract):
             changed = True
         if changed:
             movement["updated_at"] = now
-            self._save_movement(player_id)
+            self._save_movement_if_due(player_id)
 
     @staticmethod
     def _merge_map_capture(world_data: dict[str, Any], capture: Any, chunk_field: str = "map_chunks") -> bool:
@@ -346,6 +353,108 @@ class MovementMixin(StoreMixinContract):
         world_data["tile_info_updated_at"] = time.time()
         return changed
 
+    @staticmethod
+    def _merge_map_tile_updates(world_data: dict[str, Any], capture: Any) -> bool:
+        """Apply sparse map edits to cached chunks and retain a live delta for browsers."""
+        if not isinstance(capture, dict) or capture.get("encoding") != "tile-updates-v1":
+            return False
+        try:
+            raw = zlib.decompress(base64.b64decode(str(capture["data"]), validate=True))
+            count = int(capture.get("count", 0))
+            if count < 1 or count > 512 or len(raw) != count * 12:
+                return False
+        except (KeyError, TypeError, ValueError, OverflowError, zlib.error):
+            return False
+
+        chunk_size = WORLD_MAP_CHUNK_SIZE
+        base_chunks = world_data.setdefault("base_map_chunks", {})
+        base_times = world_data.setdefault("base_map_chunk_times", {})
+        tile_chunks = world_data.setdefault("tile_chunks", {})
+        names = world_data.setdefault("tile_names", {})
+        if not all(isinstance(value, dict) for value in (base_chunks, base_times, tile_chunks, names)):
+            return False
+
+        tile_names = capture.get("tileNames")
+        names_language = capture.get("tileNamesLanguage")
+        language_changed = (
+            isinstance(names_language, str)
+            and bool(world_data.get("tile_names_language"))
+            and world_data.get("tile_names_language") != names_language
+        )
+        try:
+            names_version = int(capture.get("tileNamesVersion", 6))
+        except (TypeError, ValueError):
+            names_version = 6
+        version_changed = int(world_data.get("tile_names_version", names_version) or 0) != names_version
+        if language_changed or version_changed:
+            names.clear()
+        if isinstance(tile_names, dict):
+            names.update({str(key): str(value) for key, value in tile_names.items()})
+        if isinstance(names_language, str) and names_language.strip():
+            world_data["tile_names_language"] = names_language[:24]
+        world_data["tile_names_version"] = names_version
+
+        pixel_chunks: dict[str, bytearray] = {}
+        info_chunks: dict[str, bytearray] = {}
+        updates: list[dict[str, Any]] = []
+        for index in range(count):
+            offset = index * 12
+            tile_x, tile_y = struct.unpack_from("<HH", raw, offset)
+            if tile_x >= int(world_data.get("width", 0) or 0) or tile_y >= int(world_data.get("height", 0) or 0):
+                continue
+            key = f"{tile_x // chunk_size},{tile_y // chunk_size}"
+            if key not in pixel_chunks:
+                pixel_chunks[key] = _decoded_map_chunk(base_chunks.get(key), chunk_size)
+                info_chunks[key] = _decoded_map_chunk(tile_chunks.get(key), chunk_size)
+
+            local_offset = ((tile_y % chunk_size) * chunk_size + tile_x % chunk_size) * 4
+            color = raw[offset + 4:offset + 8]
+            tile_info = raw[offset + 8:offset + 12]
+            pixels = pixel_chunks[key]
+            tile_data = info_chunks[key]
+            if (
+                bytes(pixels[local_offset:local_offset + 4]) == color
+                and bytes(tile_data[local_offset:local_offset + 4]) == tile_info
+            ):
+                continue
+            pixels[local_offset:local_offset + 4] = color
+            tile_data[local_offset:local_offset + 4] = tile_info
+            updates.append({"x": tile_x, "y": tile_y, "color": list(color)})
+
+        if not updates:
+            return False
+
+        updated_at = time.time()
+        for key, pixels in pixel_chunks.items():
+            base_chunks[key] = base64.b64encode(zlib.compress(pixels, level=1)).decode("ascii")
+            tile_chunks[key] = base64.b64encode(zlib.compress(info_chunks[key], level=1)).decode("ascii")
+            base_times[key] = updated_at
+
+        revision = int(world_data.get("map_tile_revision", 0)) + 1
+        world_data["map_tile_revision"] = revision
+        deltas = world_data.setdefault("map_tile_updates", [])
+        if not isinstance(deltas, list):
+            deltas = world_data["map_tile_updates"] = []
+        deltas.append({"revision": revision, "updates": updates})
+        # Keep a bounded number of changed tiles, not an arbitrary number of
+        # batches. A large explosion can touch many tiles in one revision.
+        retained_tile_count = world_data.get("map_tile_update_count")
+        if type(retained_tile_count) is not int or retained_tile_count < 0:
+            retained_tile_count = sum(
+                len(batch.get("updates", []))
+                for batch in deltas[:-1]
+                if isinstance(batch, dict) and isinstance(batch.get("updates"), list)
+            )
+        retained_tile_count += len(updates)
+        while len(deltas) > 1 and retained_tile_count > 8192:
+            oldest = deltas.pop(0)
+            if isinstance(oldest, dict) and isinstance(oldest.get("updates"), list):
+                retained_tile_count -= len(oldest["updates"])
+        world_data["map_tile_update_count"] = retained_tile_count
+        world_data["map_updated_at"] = updated_at
+        world_data["tile_info_updated_at"] = updated_at
+        world_data["map_chunk_size"] = chunk_size
+        return True
     def _record_legacy_movement(
         self, player_id: str, name: str, uuid: str | None, positions: Any, visited_tiles: Any
     ) -> None:
@@ -397,3 +506,12 @@ class MovementMixin(StoreMixinContract):
         except OSError:
             pass
         self._movement_cache.pop(old_id, None)
+
+
+def _decoded_map_chunk(encoded: Any, chunk_size: int) -> bytearray:
+    expected_length = chunk_size * chunk_size * 4
+    try:
+        decoded = zlib.decompress(base64.b64decode(str(encoded), validate=True))
+    except (TypeError, ValueError, zlib.error):
+        decoded = b""
+    return bytearray(decoded) if len(decoded) == expected_length else bytearray(expected_length)

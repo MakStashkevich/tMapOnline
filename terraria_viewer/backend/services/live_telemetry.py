@@ -28,16 +28,37 @@ class LiveTelemetryMixin(StoreMixinContract):
         }
         temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(self._metrics_file)
+        self._metrics_last_saved_monotonic = time.monotonic()
+
+    def _save_metrics_if_due_locked(self) -> None:
+        if time.monotonic() - self._metrics_last_saved_monotonic >= 1.0:
+            self._save_metrics_locked()
 
     def set_server_info(self, **values: Any) -> None:
         with self._lock:
-            self._server_info.update({key: value for key, value in values.items() if value is not None})
-            self._server_info["updated_at"] = time.time()
-            self._save_metrics_locked()
+            changes = {key: value for key, value in values.items() if value is not None}
+            if any(self._server_info.get(key) != value for key, value in changes.items()):
+                self._server_info.update(changes)
+                self._server_info["updated_at"] = time.time()
+                self._save_metrics_if_due_locked()
 
     def set_live_telemetry(self, snapshot: dict[str, Any]) -> None:
         """Apply one trusted-local tModLoader telemetry snapshot to monitor storage."""
         telemetry = LiveTelemetrySnapshot.from_payload(snapshot)
+        received_at = time.time()
+        received_monotonic = time.monotonic()
+        with self._lock:
+            previous_received = self._telemetry_last_received_monotonic
+            if previous_received is not None:
+                interval_ms = (received_monotonic - previous_received) * 1000
+                previous_interval = self._telemetry_interval_ms
+                self._telemetry_interval_ms = (
+                    interval_ms if previous_interval is None
+                    else previous_interval * 0.8 + interval_ms * 0.2
+                )
+            self._telemetry_last_received_monotonic = received_monotonic
+            self._telemetry_received_at = received_at
+            self._telemetry_snapshot_id = telemetry.snapshot_id
         server = telemetry.server
         world = telemetry.world
         active_npcs: list[NpcEntity] = []
@@ -95,6 +116,30 @@ class LiveTelemetryMixin(StoreMixinContract):
                     self._world_map_cache_dirty = True
                 self._save_world_map_cache_if_due()
         base_captures = telemetry.base_map_captures
+        if telemetry.base_map_tile_updates is not None:
+            with self._lock:
+                cache_key = self._world_map_cache_key(world)
+                world_cache = self._world_map_cache.setdefault(cache_key, {
+                    "world_id": world.get("id", world.get("world_id")),
+                    "world_name": world.get("name") or world.get("world_name"),
+                    "width": world.get("width"),
+                    "height": world.get("height"),
+                    "surface_y": world.get("surface"),
+                    "base_map_chunks": {},
+                    "base_map_chunk_times": {},
+                    "tile_chunks": {},
+                    "tile_names": {},
+                })
+                world_cache.update({
+                    "world_id": world.get("id", world.get("world_id")),
+                    "world_name": world.get("name") or world.get("world_name"),
+                    "width": world.get("width"),
+                    "height": world.get("height"),
+                    "surface_y": world.get("surface"),
+                })
+                if self._merge_map_tile_updates(world_cache, telemetry.base_map_tile_updates):
+                    self._world_map_cache_dirty = True
+                self._save_world_map_cache_if_due()
         if base_captures:
             with self._lock:
                 cache_key = self._world_map_cache_key(world)
@@ -151,9 +196,6 @@ class LiveTelemetryMixin(StoreMixinContract):
             boss_status=world.get("bossStatus"),
             telemetry_updated_at=telemetry.generated_at,
         )
-        with self._lock:
-            self._telemetry_received_at = time.time()
-
     def _save_player_death_locations(
         self, deaths: tuple[PlayerDeath, ...], world: dict[str, Any]
     ) -> None:

@@ -21,6 +21,7 @@ internal sealed class WorldMapScanner
     private readonly MapTileNameCatalog _tileNames;
     private readonly MapTileDataCapture _tileData;
     private readonly Queue<object> _pendingCaptures = new();
+    private readonly HashSet<Microsoft.Xna.Framework.Point> _pendingTileChanges = new();
     private bool _initializedPalette;
     private WorldMap? _serverMapLookup;
     private int _nextChunk;
@@ -31,6 +32,7 @@ internal sealed class WorldMapScanner
     private bool _loggedScanStart;
     private bool _loggedWarning;
     private bool _loggedMapWorkaround;
+    private bool _loggedTileChangeWarning;
 
     public WorldMapScanner(Mod mod, MapTileNameCatalog tileNames, MapTileDataCapture tileData)
     {
@@ -45,6 +47,84 @@ internal sealed class WorldMapScanner
         while (captures.Count < 64 && _pendingCaptures.Count > 0)
             captures.Add(_pendingCaptures.Dequeue());
         return captures.ToArray();
+    }
+
+    internal void MarkTileChanged(int x, int y)
+    {
+        if (x >= 0 && y >= 0 && x < Main.maxTilesX && y < Main.maxTilesY)
+            _pendingTileChanges.Add(new Microsoft.Xna.Framework.Point(x, y));
+    }
+
+    internal bool HasPendingTileChanges => _pendingTileChanges.Count > 0;
+
+    internal object? CapturePendingTileChanges(int maximum)
+    {
+        if (_pendingTileChanges.Count == 0 || maximum < 1)
+            return null;
+
+        var points = _pendingTileChanges.Take(maximum).ToArray();
+        var originalMap = Main.Map;
+        var bytes = new byte[checked(points.Length * 12)];
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            EnsurePalette();
+            InstallLookupMapIfNeeded();
+            for (var index = 0; index < points.Length; index++)
+            {
+                var point = points[index];
+                var mapTile = MapHelper.CreateMapTile(point.X, point.Y, byte.MaxValue);
+                var color = MapHelper.GetMapTileXnaColor(ref mapTile);
+                var tileInfo = _tileData.CaptureTile(point.X, point.Y);
+                var offset = index * 12;
+                WriteUInt16(bytes, offset, checked((ushort)point.X));
+                WriteUInt16(bytes, offset + 2, checked((ushort)point.Y));
+                bytes[offset + 4] = color.R;
+                bytes[offset + 5] = color.G;
+                bytes[offset + 6] = color.B;
+                bytes[offset + 7] = color.A;
+                WriteUInt16(bytes, offset + 8, tileInfo.TileType);
+                WriteUInt16(bytes, offset + 10, tileInfo.WallType);
+                foreach (var name in tileInfo.Names)
+                    names[name.Key] = name.Value;
+            }
+
+            using var compressed = new MemoryStream();
+            using (var zlib = new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true))
+                zlib.Write(bytes, 0, bytes.Length);
+
+            foreach (var point in points)
+                _pendingTileChanges.Remove(point);
+
+            return new
+            {
+                encoding = "tile-updates-v1",
+                count = points.Length,
+                data = Convert.ToBase64String(compressed.ToArray()),
+                tileNames = names,
+                tileNamesLanguage = Language.ActiveCulture.Name,
+                tileNamesVersion = 6
+            };
+        }
+        catch (Exception exception)
+        {
+            if (!_loggedTileChangeWarning)
+            {
+                _loggedTileChangeWarning = true;
+                _mod.Logger.Warn($"Could not render changed map tiles; keeping them queued for retry: {exception.GetType().Name}.");
+            }
+            return null;
+        }
+        finally
+        {
+            RestoreMap(originalMap);
+        }
+    }
+
+    private static void WriteUInt16(byte[] destination, int offset, ushort value)
+    {
+        destination[offset] = (byte)value;
+        destination[offset + 1] = (byte)(value >> 8);
     }
 
     internal object GetStatus()
@@ -85,6 +165,7 @@ internal sealed class WorldMapScanner
             _failedChunks = 0;
             _failedTiles = 0;
             _pendingCaptures.Clear();
+            _pendingTileChanges.Clear();
             _loggedScanStart = false;
             _loggedWarning = false;
         }

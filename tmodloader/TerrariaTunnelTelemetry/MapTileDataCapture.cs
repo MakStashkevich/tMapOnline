@@ -46,4 +46,14 @@ internal sealed class MapTileDataCapture
 
         return (Convert.ToBase64String(compressed.ToArray()), _names.GetNamesForChunk(tileTypes, wallTypes));
     }
+
+    public (ushort TileType, ushort WallType, Dictionary<string, string> Names) CaptureTile(int x, int y)
+    {
+        var tile = Main.tile[x, y];
+        var tileType = tile.HasTile ? checked((ushort)(tile.TileType + 1)) : (ushort)0;
+        var wallType = tile.WallType == WallID.None ? (ushort)0 : checked((ushort)(tile.WallType + 1));
+        var tileTypes = tileType == 0 ? new HashSet<ushort>() : new HashSet<ushort> { (ushort)(tileType - 1) };
+        var wallTypes = wallType == 0 ? new HashSet<ushort>() : new HashSet<ushort> { (ushort)(wallType - 1) };
+        return (tileType, wallType, _names.GetNamesForChunk(tileTypes, wallTypes));
+    }
 }

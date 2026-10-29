@@ -20,9 +20,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "data_dir": "~/Library/Application Support/TerrariaTunnel",
         "death_retention_seconds": 3600,
     },
-    # 300 game ticks is five seconds at Terraria's normal 60 TPS.
-    # Set to 1 to publish once per game tick for temporary profiling.
-    "telemetry": {"snapshot_interval_ticks": 300},
+    # Each category has its own cadence in Terraria server ticks.
+    "telemetry": {
+        "player_position_interval_ticks": 6,
+        "entity_interval_ticks": 6,
+        "map_capture_interval_ticks": 30,
+        "map_tile_update_interval_ticks": 1,
+        "world_scan_interval_ticks": 1,
+        "browser_live_poll_interval_ms": 500,
+        "browser_map_poll_interval_ms": 5000,
+        "browser_debug_poll_interval_ms": 1000,
+    },
     "tunnel_status_file": "~/Library/Application Support/TerrariaTunnel/tunnel-status.json",
     "site": {
         "pages": {
@@ -82,9 +90,24 @@ def load_config(path: str | Path) -> dict[str, Any]:
     death_retention = config["storage"].get("death_retention_seconds")
     if type(death_retention) is not int or death_retention < 0:
         raise ValueError("storage.death_retention_seconds must be a non-negative integer")
-    snapshot_interval = config["telemetry"].get("snapshot_interval_ticks")
-    if type(snapshot_interval) is not int or snapshot_interval < 1:
-        raise ValueError("telemetry.snapshot_interval_ticks must be a positive integer")
+    for key in (
+        "player_position_interval_ticks",
+        "entity_interval_ticks",
+        "map_capture_interval_ticks",
+        "map_tile_update_interval_ticks",
+        "world_scan_interval_ticks",
+    ):
+        value = config["telemetry"].get(key)
+        if type(value) is not int or value < 1:
+            raise ValueError(f"telemetry.{key} must be a positive integer")
+    for key in (
+        "browser_live_poll_interval_ms",
+        "browser_map_poll_interval_ms",
+        "browser_debug_poll_interval_ms",
+    ):
+        interval = config["telemetry"].get(key)
+        if type(interval) is not int or not 100 <= interval <= 30000:
+            raise ValueError(f"telemetry.{key} must be an integer from 100 to 30000")
     return config
 
 

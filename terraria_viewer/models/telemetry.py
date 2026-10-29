@@ -279,6 +279,7 @@ class LiveTelemetrySnapshot:
     pylons: tuple[Pylon, ...]
     has_pylon_snapshot: bool
     base_map_captures: tuple[dict[str, Any], ...]
+    base_map_tile_updates: dict[str, Any] | None
     map_scan: dict[str, Any] | None
     game_mode: dict[str, Any] | None
     generated_at: Any
@@ -318,6 +319,7 @@ class LiveTelemetrySnapshot:
                 item for value in _json_array(root.get("baseMapCaptures"))
                 if (item := _optional_object(value)) is not None
             ),
+            base_map_tile_updates=_optional_object(root.get("baseMapTileUpdates")),
             map_scan=_optional_object(root.get("mapScan")),
             game_mode=_optional_object(world.get("gameMode")),
             generated_at=root.get("generatedAtUnix"),

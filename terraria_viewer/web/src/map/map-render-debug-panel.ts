@@ -22,6 +22,13 @@ type DebugMapData = {
   active_npcs?: unknown[];
   coins?: unknown[];
   pylons?: unknown[];
+  telemetry?: {
+    interval_ms?: number | null;
+    age_seconds?: number | null;
+    configured_intervals?: Record<string, number>;
+  };
+  live_payload_bytes?: number;
+  live_render_ms?: number;
   world?: { width?: number; height?: number; spawn_x?: number; spawn_y?: number };
 };
 
@@ -172,6 +179,22 @@ export class MapRenderDebugPanel {
         ${row('Точка появления', `${world?.spawn_x ?? '—'}, ${world?.spawn_y ?? '—'}  ${render.spawnMarkerVisible ? 'спрайт загружен' : 'спрайт отсутствует'}`)}
         ${row('Размер мира', `${world?.width || 0} × ${world?.height || 0}`)}
       </div>`;
+
+    const intervals = data?.telemetry?.configured_intervals || {};
+    this.panel.insertAdjacentHTML(
+      'beforeend',
+      `<div class="render-debug-section-title">Обновления телеметрии</div>
+      <div class="render-debug-rows">
+        ${row('Получение снимков', data?.telemetry?.interval_ms == null ? 'Нет данных' : `${data.telemetry.interval_ms.toFixed(1)} мс`)}
+        ${row('Возраст данных', data?.telemetry?.age_seconds == null ? 'Нет данных' : `${(data.telemetry.age_seconds * 1000).toFixed(0)} мс`)}
+        ${row('Позиции игроков', `${intervals.player_position_interval_ticks ?? '—'} тиков`)}
+        ${row('NPC и боссы', `${intervals.entity_interval_ticks ?? '—'} тиков`)}
+        ${row('Снимок карты', `${intervals.map_capture_interval_ticks ?? '—'} тиков`)}
+        ${row('Сканер мира', `${intervals.world_scan_interval_ticks ?? '—'} тиков`)}
+        ${row('Пакет для браузера', this.formatBytes(data?.live_payload_bytes || 0))}
+        ${row('Перерисовка живых слоёв', `${(data?.live_render_ms || 0).toFixed(1)} мс`)}
+      </div>`,
+    );
   }
 
   private startLongTaskObserver(): void {

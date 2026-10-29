@@ -153,6 +153,7 @@ class PlayerHistoryMixin(StoreMixinContract):
         }
         temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(self._players_file)
+        self._players_last_saved_monotonic = time.monotonic()
 
     def _write_player_sprite(self, player_id: str, name: str, appearance: Any) -> str:
         """Render a pixel avatar from Terraria's own XNB sprite sheets, without a graphics device."""

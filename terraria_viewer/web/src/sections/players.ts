@@ -137,7 +137,7 @@ function scheduleAvatarRefresh(targets: PlayerAvatarTarget[]): void {
 
   window.setTimeout(() => {
     void refreshPlayerAvatars(activeTargets);
-  }, 2500);
+  }, 400);
 }
 
 async function refreshPlayerAvatars(targets: PlayerAvatarTarget[]): Promise<void> {

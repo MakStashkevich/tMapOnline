@@ -1,6 +1,8 @@
 export type MapChunkSource = {
   base: string | null;
   overlays: string[];
+  pixelUpdates?: Map<number, [number, number, number, number]>;
+  updateRevision?: number;
 };
 
 /** Decodes compressed chunks and applies later snapshots as alpha-masked patches. */
@@ -39,6 +41,14 @@ export class MapChunkCodec {
         result[alphaOffset - 1] = patchPixels[alphaOffset - 1];
         result[alphaOffset] = patchPixels[alphaOffset];
       }
+    }
+
+    for (const [offset, color] of source.pixelUpdates || []) {
+      const pixelOffset = offset * 4;
+      result[pixelOffset] = color[0];
+      result[pixelOffset + 1] = color[1];
+      result[pixelOffset + 2] = color[2];
+      result[pixelOffset + 3] = color[3];
     }
 
     return result;

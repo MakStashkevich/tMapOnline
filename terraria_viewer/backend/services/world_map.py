@@ -75,7 +75,7 @@ class WorldMapMixin(StoreMixinContract):
                 },
             }
 
-    def world_map(self, world_id: str | None = None, since: float = 0) -> dict[str, Any]:
+    def world_map(self, world_id: str | None = None, since: float = 0, live_since: float = 0) -> dict[str, Any]:
         with self._lock:
             active_id = self._server_info.get("world_id")
             requested = str(world_id if world_id not in (None, "") else active_id or "")
@@ -193,7 +193,12 @@ class WorldMapMixin(StoreMixinContract):
                         "direction": record.get("direction") if is_online else None,
                         "session_seconds": session_seconds if is_online else None,
                         "position": record.get("position"),
-                        "positions": [dict(point) for point in world.get("positions", []) if isinstance(point, dict)],
+                        "positions": [
+                            dict(point)
+                            for point in world.get("positions", [])
+                            if isinstance(point, dict)
+                            and (live_since <= 0 or float(point.get("time", 0) or 0) > live_since)
+                        ],
                         "chunks": chunks,
                         "has_imported_map": has_imported_map,
                         "can_export_map": (
@@ -207,6 +212,7 @@ class WorldMapMixin(StoreMixinContract):
                         ),
                     })
             selected_world = selected_world or {}
+            map_revision = int(selected_world.get("map_tile_revision", 0) or 0)
             scan = self._server_info.get("map_scan")
             if isinstance(scan, dict) and requested and str(scan.get("worldId")) != requested:
                 scan = None
@@ -241,6 +247,119 @@ class WorldMapMixin(StoreMixinContract):
                 "scan": scan,
                 "updated_at": map_updated_at,
                 "tile_info_updated_at": tile_info_updated_at,
+                "map_revision": map_revision,
+                "telemetry": {
+                    "snapshot_id": self._telemetry_snapshot_id,
+                    "received_at": self._telemetry_received_at,
+                    "age_seconds": telemetry_age,
+                    "interval_ms": self._telemetry_interval_ms,
+                    "configured_intervals": dict(self._server_info.get("telemetry_intervals", {})),
+                },
+            }
+
+    def world_map_live(
+        self, world_id: str | None = None, since: float = 0, map_since: int = 0
+    ) -> dict[str, Any]:
+        """Return only live player/entity changes, never map chunks or full history."""
+        with self._lock:
+            active_id = self._server_info.get("world_id")
+            active_name = str(self._server_info.get("world") or "")
+            requested = str(world_id if world_id not in (None, "") else active_id or "")
+            received_at = self._telemetry_received_at
+            age = None if received_at is None else max(0.0, time.time() - received_at)
+            same_world = not requested or requested in {str(active_id or ""), active_name}
+            online_ids = set(self._online_player_ids) if same_world and age is not None and age <= 5 else set()
+            players: list[dict[str, Any]] = []
+            deaths: list[dict[str, Any]] = []
+            for player_id, record in self._players.items():
+                is_online = player_id in online_ids
+                movement = self._load_movement(player_id)
+                for key, world in as_json_object(movement.get("worlds")).items():
+                    stored_id = world.get("world_id")
+                    name = str(world.get("world_name") or "")
+                    if requested and requested not in {str(key), str(stored_id or ""), name}:
+                        continue
+                    positions: list[dict[str, Any]] = []
+                    # Movement samples are appended in timestamp order, so scan
+                    # backward and stop as soon as the client's cursor is reached.
+                    for point in reversed(world.get("positions", [])):
+                        if not isinstance(point, dict):
+                            continue
+                        try:
+                            point_time = float(point.get("time", 0) or 0)
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        if point_time <= since:
+                            break
+                        positions.append(dict(point))
+                    positions.reverse()
+                    if is_online or positions:
+                        players.append({
+                            "id": player_id,
+                            "name": record.get("name"),
+                            "avatar_url": record.get("avatar_url"),
+                            "online": is_online,
+                            "team": record.get("team") if is_online else None,
+                            "direction": record.get("direction") if is_online else None,
+                            "session_seconds": record.get("online_session_seconds") if is_online else None,
+                            "position": record.get("position") if is_online else None,
+                            "positions": positions,
+                        })
+                for death in record.get("death_locations", []):
+                    if not isinstance(death, dict):
+                        continue
+                    if requested and requested not in {str(death.get("world_id") or ""), str(death.get("world_name") or "")}:
+                        continue
+                    deaths.append({
+                        "id": f"{player_id}:{death.get('timestamp', 0)}",
+                        "player_id": player_id,
+                        "name": record.get("name"),
+                        "x": death.get("x"),
+                        "y": death.get("y"),
+                        "timestamp": death.get("timestamp"),
+                    })
+
+            telemetry_is_fresh = same_world and age is not None and age <= 5
+            map_cache = next(
+                (
+                    cache for cache in self._world_map_cache.values()
+                    if str(cache.get("world_id", "")) == str(active_id or "")
+                    and str(cache.get("world_name") or "").casefold() == active_name.casefold()
+                ),
+                {},
+            )
+            map_revision = int(map_cache.get("map_tile_revision", 0) or 0)
+            map_changes = map_cache.get("map_tile_updates", [])
+            if not isinstance(map_changes, list):
+                map_changes = []
+            oldest_revision = (
+                int(map_changes[0].get("revision", map_revision))
+                if map_changes and isinstance(map_changes[0], dict)
+                else map_revision
+            )
+            map_delta_reset = map_since > 0 and map_since < oldest_revision - 1
+            map_tile_updates = [] if map_delta_reset else [
+                item for item in map_changes
+                if isinstance(item, dict) and int(item.get("revision", 0) or 0) > map_since
+            ]
+            return {
+                "world": {"id": active_id, "name": active_name or None},
+                "updated_at": time.time(),
+                "online_player_ids": sorted(online_ids),
+                "players": players,
+                "deaths": deaths,
+                "map_tile_updates": map_tile_updates,
+                "map_revision": map_revision,
+                "map_delta_reset": map_delta_reset,
+                "active_npcs": [item.to_payload() for item in self._active_npcs] if telemetry_is_fresh else [],
+                "coins": [item.to_payload() for item in self._active_coins] if telemetry_is_fresh else [],
+                "telemetry": {
+                    "snapshot_id": self._telemetry_snapshot_id,
+                    "received_at": received_at,
+                    "age_seconds": age,
+                    "interval_ms": self._telemetry_interval_ms,
+                    "configured_intervals": dict(self._server_info.get("telemetry_intervals", {})),
+                },
             }
 
     def world_map_tile(self, world_id: str | None, tile_x: int, tile_y: int) -> dict[str, Any] | None:

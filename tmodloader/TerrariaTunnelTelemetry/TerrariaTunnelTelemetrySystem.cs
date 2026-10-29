@@ -29,6 +29,16 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private readonly System.Collections.Generic.Dictionary<int, PlayerSession> _sessions = new();
     private readonly ConcurrentDictionary<int, byte> _teleportedSlots = new();
     private readonly System.Collections.Generic.List<PendingPlayerDeath> _pendingPlayerDeaths = new();
+    private readonly System.Collections.Generic.Dictionary<int, System.Collections.Generic.Dictionary<string, object?>> _cachedPlayers = new();
+    private object[] _cachedNpcs = Array.Empty<object>();
+    private object[] _cachedCoins = Array.Empty<object>();
+    private object[] _cachedPylons = Array.Empty<object>();
+    private string[] _cachedActiveBosses = Array.Empty<string>();
+    private object[] _cachedBossDiagnostics = Array.Empty<object>();
+    private string[] _cachedDefeatedBosses = Array.Empty<string>();
+    private System.Collections.Generic.Dictionary<string, bool?> _cachedCalamityBosses = new();
+    private System.Collections.Generic.Dictionary<string, int> _cachedBossDefeatCounts = new();
+    private bool _cachedCalamityAvailable;
     private TelemetryStreamServer? _telemetryStream;
     private MapTileNameCatalog? _mapTileNames;
     private MapTileDataCapture? _mapTileData;
@@ -37,8 +47,16 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private WorldMapScanner? _mapScanner;
     private bool _loggedFirstSnapshot;
     private bool _loggedUpdateHook;
-    private readonly int _snapshotIntervalTicks = ReadPositiveEnvironmentInteger(
-        "TERRARIA_TELEMETRY_INTERVAL_TICKS", 300);
+    private readonly int _playerPositionIntervalTicks = ReadPositiveEnvironmentInteger(
+        "TERRARIA_TELEMETRY_PLAYER_POSITION_INTERVAL_TICKS", 6);
+    private readonly int _entityIntervalTicks = ReadPositiveEnvironmentInteger(
+        "TERRARIA_TELEMETRY_ENTITY_INTERVAL_TICKS", 6);
+    private readonly int _mapCaptureIntervalTicks = ReadPositiveEnvironmentInteger(
+        "TERRARIA_TELEMETRY_MAP_CAPTURE_INTERVAL_TICKS", 30);
+    private readonly int _mapTileUpdateIntervalTicks = ReadPositiveEnvironmentInteger(
+        "TERRARIA_TELEMETRY_MAP_TILE_UPDATE_INTERVAL_TICKS", 1);
+    private readonly int _worldScanIntervalTicks = ReadPositiveEnvironmentInteger(
+        "TERRARIA_TELEMETRY_WORLD_SCAN_INTERVAL_TICKS", 1);
     private readonly int _deathRetentionSeconds = ReadNonNegativeEnvironmentInteger(
         "TERRARIA_TELEMETRY_DEATH_RETENTION_SECONDS", 3600);
     private long _serverTickCount;
@@ -52,6 +70,10 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             : 38762;
 
         Terraria.On_MessageBuffer.GetData += CaptureClientPackets;
+        On_WorldGen.PlaceTile += CaptureTilePlacement;
+        On_WorldGen.KillTile += CaptureTileBreak;
+        On_WorldGen.PlaceWall += CaptureWallPlacement;
+        On_WorldGen.KillWall += CaptureWallBreak;
         On_Player.Teleport += CapturePlayerTeleport;
         On_Player.KillMe += CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly += OnServerTick;
@@ -67,6 +89,10 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     public override void Unload()
     {
         Terraria.On_MessageBuffer.GetData -= CaptureClientPackets;
+        On_WorldGen.PlaceTile -= CaptureTilePlacement;
+        On_WorldGen.KillTile -= CaptureTileBreak;
+        On_WorldGen.PlaceWall -= CaptureWallPlacement;
+        On_WorldGen.KillWall -= CaptureWallBreak;
         On_Player.Teleport -= CapturePlayerTeleport;
         On_Player.KillMe -= CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly -= OnServerTick;
@@ -76,6 +102,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         _teleportedSlots.Clear();
         _sessions.Clear();
         _pendingPlayerDeaths.Clear();
+        _cachedPlayers.Clear();
         _mapScanner = null;
         _mapTileNames = null;
         _mapTileData = null;
@@ -90,6 +117,45 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             _teleportedSlots[self.whoAmI] = 1;
     }
 
+    private bool CaptureTilePlacement(
+        On_WorldGen.orig_PlaceTile orig, int i, int j, int type, bool mute, bool forced, int player, int style
+    )
+    {
+        var placed = orig(i, j, type, mute, forced, player, style);
+        if (placed)
+            _mapScanner?.MarkTileChanged(i, j);
+        return placed;
+    }
+
+    private void CaptureTileBreak(
+        On_WorldGen.orig_KillTile orig, int i, int j, bool fail, bool effectOnly, bool noItem
+    )
+    {
+        var existed = InWorld(i, j) && Main.tile[i, j].HasTile;
+        orig(i, j, fail, effectOnly, noItem);
+        if (existed && InWorld(i, j) && !Main.tile[i, j].HasTile)
+            _mapScanner?.MarkTileChanged(i, j);
+    }
+
+    private void CaptureWallPlacement(On_WorldGen.orig_PlaceWall orig, int i, int j, int type, bool mute)
+    {
+        var previousWall = InWorld(i, j) ? Main.tile[i, j].WallType : (ushort)0;
+        orig(i, j, type, mute);
+        if (InWorld(i, j) && Main.tile[i, j].WallType != previousWall)
+            _mapScanner?.MarkTileChanged(i, j);
+    }
+
+    private void CaptureWallBreak(On_WorldGen.orig_KillWall orig, int i, int j, bool fail)
+    {
+        var hadWall = InWorld(i, j) && Main.tile[i, j].WallType != WallID.None;
+        orig(i, j, fail);
+        if (hadWall && InWorld(i, j) && Main.tile[i, j].WallType == WallID.None)
+            _mapScanner?.MarkTileChanged(i, j);
+    }
+
+    private static bool InWorld(int x, int y) =>
+        x >= 0 && y >= 0 && x < Main.maxTilesX && y < Main.maxTilesY;
+
     private void OnServerTick()
     {
         if (Main.netMode != NetmodeID.Server)
@@ -97,10 +163,19 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
 
         AcknowledgeDeliveredDeaths();
         RemoveExpiredPendingDeaths();
-        _mapScanner?.CaptureNextChunk();
         _serverTickCount++;
-        if (_serverTickCount % _snapshotIntervalTicks == 0)
-            UpdateSnapshotIfDue();
+        var playerPositionDue = _serverTickCount % _playerPositionIntervalTicks == 0;
+        var entityUpdateDue = _serverTickCount % _entityIntervalTicks == 0;
+        var mapCaptureDue = _serverTickCount % _mapCaptureIntervalTicks == 0;
+        var mapTileUpdateDue = _serverTickCount % _mapTileUpdateIntervalTicks == 0;
+        if (_serverTickCount % _worldScanIntervalTicks == 0)
+            _mapScanner?.CaptureNextChunk();
+
+        // Advance expensive data categories independently, then publish one compact
+        // combined snapshot whenever any category has fresh values.
+        var mapChangesReady = mapTileUpdateDue && _mapScanner?.HasPendingTileChanges == true;
+        if (playerPositionDue || entityUpdateDue || mapCaptureDue || mapChangesReady || _nextSnapshotId == 0)
+            UpdateSnapshotIfDue(playerPositionDue, entityUpdateDue, mapCaptureDue, mapTileUpdateDue, mapCaptureDue);
     }
 
     private void CapturePlayerDeath(On_Player.orig_KillMe orig, Player self,
@@ -145,10 +220,16 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         Mod.Logger.Info($"World loaded for telemetry (netMode={Main.netMode}, world='{Main.worldName}').");
         // World load can run on a worker thread. Let the game update hook reset
         // the scanner and its queue on the thread that owns them.
-        UpdateSnapshotIfDue();
+        UpdateSnapshotIfDue(true, true, true, true, true);
     }
 
-    private void UpdateSnapshotIfDue()
+    private void UpdateSnapshotIfDue(
+        bool playerPositionDue,
+        bool entityUpdateDue,
+        bool mapCaptureDue,
+        bool mapTileUpdateDue,
+        bool includePlayerMapCaptures
+    )
     {
         if (!_loggedUpdateHook)
         {
@@ -160,13 +241,109 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
 
         try
         {
-            ReconcilePlayers();
-            PublishSnapshot();
+            var initialPlayerSnapshot = _cachedPlayers.Count == 0;
+            var updatePlayerPositions = playerPositionDue || initialPlayerSnapshot;
+            if (updatePlayerPositions)
+                ReconcilePlayers();
+            if (updatePlayerPositions || mapCaptureDue)
+                UpdateCachedPlayers(updatePlayerPositions, mapCaptureDue, entityUpdateDue || initialPlayerSnapshot);
+            if (entityUpdateDue || _nextSnapshotId == 0)
+                UpdateCachedEntities();
+            PublishSnapshot(includePlayerMapCaptures, mapTileUpdateDue);
         }
         catch (Exception exception)
         {
             Mod.Logger.Error($"Could not create telemetry snapshot: {exception.GetType().Name}: {exception.Message}");
         }
+    }
+
+    private void UpdateCachedPlayers(bool updatePositions, bool updateMapCaptures, bool updateAppearance)
+    {
+        var activeSlots = new System.Collections.Generic.HashSet<int>();
+        foreach (var pair in _sessions.OrderBy(pair => pair.Key))
+        {
+            var slot = pair.Key;
+            var player = Main.player[slot];
+            if (player is null || !player.active)
+                continue;
+
+            activeSlots.Add(slot);
+            if (!_cachedPlayers.TryGetValue(slot, out var payload))
+            {
+                payload = new System.Collections.Generic.Dictionary<string, object?>();
+                _cachedPlayers[slot] = payload;
+            }
+
+            if (updatePositions)
+            {
+                var session = pair.Value;
+                var teleported = _teleportedSlots.TryRemove(slot, out _);
+                payload["slot"] = slot;
+                payload["name"] = session.Name;
+                payload["uuid"] = session.Uuid;
+                payload["joinedAtUnix"] = session.JoinedAtUnix;
+                payload["sessionSeconds"] = Math.Max(
+                    0,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds() - session.JoinedAtUnix
+                );
+                payload["team"] = (int)player.team;
+                payload["direction"] = player.direction;
+                payload["teleported"] = teleported;
+                payload["position"] = new
+                {
+                    tileX = (int)Math.Floor(player.position.X / 16.0),
+                    tileY = (int)Math.Floor(player.position.Y / 16.0)
+                };
+                if (updateAppearance || !payload.ContainsKey("appearance"))
+                    payload["appearance"] = PlayerAppearanceSnapshotBuilder.Capture(player);
+                if (teleported)
+                    payload["mapCapture"] = null;
+            }
+
+            if (updateMapCaptures)
+            {
+                var wasTeleported = payload.TryGetValue("teleported", out var value)
+                    && value is true;
+                payload["mapCapture"] = wasTeleported
+                    ? null
+                    : _playerMapCapture!.Capture(player, pair.Value.Uuid ?? pair.Value.Name);
+            }
+        }
+
+        foreach (var slot in _cachedPlayers.Keys.Where(slot => !activeSlots.Contains(slot)).ToArray())
+            _cachedPlayers.Remove(slot);
+    }
+
+    private void UpdateCachedEntities()
+    {
+        var progress = BossProgressSnapshotReader.ReadCalamityBossProgress();
+        _cachedCalamityAvailable = progress.Available;
+        _cachedCalamityBosses = progress.Bosses;
+        _cachedDefeatedBosses = BossProgressSnapshotReader.DefeatedBosses(progress.Bosses);
+        _cachedBossDefeatCounts = BossVictoryTracker.SnapshotCounts();
+        _cachedActiveBosses = Main.npc
+            .Where(npc => npc.active && npc.boss)
+            .Select(MapTileNameCatalog.GetLocalizedNpcName)
+            .Distinct()
+            .ToArray();
+        _cachedBossDiagnostics = Main.npc
+            .Where(npc => npc.active && npc.boss)
+            .Select(npc => (object)new
+            {
+                slot = npc.whoAmI,
+                type = npc.type,
+                name = MapTileNameCatalog.GetLocalizedNpcName(npc),
+                mod = npc.ModNPC?.Mod?.Name,
+                modName = npc.ModNPC?.Name,
+                life = npc.life,
+                lifeMax = npc.lifeMax
+            })
+            .ToArray();
+        _cachedNpcs = _worldEntities!.CaptureActiveNpcs();
+        _cachedCoins = _worldEntities.CaptureDroppedCoins();
+        var pylons = _worldEntities.CapturePylons();
+        if (pylons is not null)
+            _cachedPylons = pylons;
     }
 
     private void ReconcilePlayers()
@@ -195,10 +372,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         }
     }
 
-    private void PublishSnapshot()
+    private void PublishSnapshot(bool includePlayerMapCaptures, bool includeBaseMapTileUpdates)
     {
-        var calamityProgress = BossProgressSnapshotReader.ReadCalamityBossProgress();
-        var bossDefeatCounts = BossVictoryTracker.SnapshotCounts();
         var snapshotId = ++_nextSnapshotId;
         foreach (var death in _pendingPlayerDeaths)
             death.LastSentSnapshotId = snapshotId;
@@ -213,39 +388,17 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 at = death.Timestamp
             })
             .ToArray();
-        _pendingPlayerDeaths.Clear();
-        var players = _sessions
+        var players = _cachedPlayers
             .OrderBy(pair => pair.Key)
-            .Select(pair => new
+            .Select(pair =>
             {
-                player = Main.player[pair.Key],
-                slot = pair.Key,
-                name = pair.Value.Name,
-                uuid = pair.Value.Uuid,
-                joinedAtUnix = pair.Value.JoinedAtUnix,
-                sessionSeconds = Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - pair.Value.JoinedAtUnix)
-            })
-            .Select(entry =>
-            {
-                var teleported = _teleportedSlots.TryRemove(entry.slot, out _);
-                return new
-                {
-                    entry.slot,
-                    entry.name,
-                    entry.uuid,
-                    entry.joinedAtUnix,
-                    entry.sessionSeconds,
-                    team = (int)entry.player.team,
-                    direction = entry.player.direction,
-                    teleported,
-                    position = new
-                    {
-                        tileX = (int)Math.Floor(entry.player.position.X / 16.0),
-                        tileY = (int)Math.Floor(entry.player.position.Y / 16.0)
-                    },
-                    mapCapture = teleported ? null : _playerMapCapture!.Capture(entry.player, entry.uuid ?? entry.name),
-                    appearance = PlayerAppearanceSnapshotBuilder.Capture(entry.player)
-                };
+                // Map windows change much less often than positions. Send them
+                // only on their capture tick instead of repeating the same
+                // potentially large pixel payload in every live snapshot.
+                var player = new System.Collections.Generic.Dictionary<string, object?>(pair.Value);
+                if (!includePlayerMapCaptures)
+                    player.Remove("mapCapture");
+                return (object)player;
             })
             .ToArray();
 
@@ -261,7 +414,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 serverAssemblyVersion = typeof(Main).Assembly.GetName().Version?.ToString(),
                 dedicated = Main.netMode == NetmodeID.Server,
                 maxPlayers = Main.maxPlayers,
-                playersOnline = players.Length
+                playersOnline = _cachedPlayers.Count
             },
             world = new
             {
@@ -283,35 +436,22 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 eclipse = Main.eclipse,
                 raining = Main.raining,
                 slimeRain = Main.slimeRain,
-                activeBosses = Main.npc
-                    .Where(npc => npc.active && npc.boss)
-                    .Select(npc => MapTileNameCatalog.GetLocalizedNpcName(npc))
-                    .Distinct()
-                    .ToArray(),
-                bossDiagnostics = Main.npc
-                    .Where(npc => npc.active && npc.boss)
-                    .Select(npc => new
-                    {
-                        slot = npc.whoAmI,
-                        type = npc.type,
-                        name = MapTileNameCatalog.GetLocalizedNpcName(npc),
-                        mod = npc.ModNPC?.Mod?.Name,
-                        modName = npc.ModNPC?.Name,
-                        life = npc.life,
-                        lifeMax = npc.lifeMax
-                    })
-                    .ToArray(),
-                activeNpcs = _worldEntities!.CaptureActiveNpcs(),
-                droppedCoins = _worldEntities!.CaptureDroppedCoins(),
-                defeatedBosses = BossProgressSnapshotReader.DefeatedBosses(calamityProgress.Bosses),
-                bossDefeatCounts,
+                activeBosses = _cachedActiveBosses,
+                bossDiagnostics = _cachedBossDiagnostics,
+                activeNpcs = _cachedNpcs,
+                droppedCoins = _cachedCoins,
+                defeatedBosses = _cachedDefeatedBosses,
+                bossDefeatCounts = _cachedBossDefeatCounts,
                 bossStatus = new
                 {
-                    calamityAvailable = calamityProgress.Available,
-                    calamityBosses = calamityProgress.Bosses
+                    calamityAvailable = _cachedCalamityAvailable,
+                    calamityBosses = _cachedCalamityBosses
                 }
             },
-            pylons = _worldEntities!.CapturePylons(),
+            pylons = _cachedPylons,
+            baseMapTileUpdates = includeBaseMapTileUpdates
+                ? _mapScanner?.CapturePendingTileChanges(512)
+                : null,
             players = new
             {
                 online = players.Length,

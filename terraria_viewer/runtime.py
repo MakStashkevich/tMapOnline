@@ -31,7 +31,7 @@ def _path(value: str | Path) -> Path:
 
 def _make_store(config: dict[str, Any]) -> StatusStore:
     data = _path(config["storage"]["data_dir"])
-    return StatusStore(
+    store = StatusStore(
         events_file=data / "dashboard-events.json",
         history_file=data / "monitor-history.json",
         players_file=data / "player-history.json",
@@ -45,6 +45,13 @@ def _make_store(config: dict[str, Any]) -> StatusStore:
         map_sprites_dir=data / "map-sprites",
         death_retention_seconds=config["storage"]["death_retention_seconds"],
     )
+    store.set_server_info(
+        telemetry_intervals={
+            key: value
+            for key, value in config["telemetry"].items()
+        }
+    )
+    return store
 
 
 def _server_command(config: dict[str, Any]) -> tuple[list[str], Path]:
@@ -101,8 +108,20 @@ def _start_game_process(
         start_new_session=True,
         env={
             **os.environ,
-            "TERRARIA_TELEMETRY_INTERVAL_TICKS": str(
-                config["telemetry"]["snapshot_interval_ticks"]
+            "TERRARIA_TELEMETRY_PLAYER_POSITION_INTERVAL_TICKS": str(
+                config["telemetry"]["player_position_interval_ticks"]
+            ),
+            "TERRARIA_TELEMETRY_ENTITY_INTERVAL_TICKS": str(
+                config["telemetry"]["entity_interval_ticks"]
+            ),
+            "TERRARIA_TELEMETRY_MAP_CAPTURE_INTERVAL_TICKS": str(
+                config["telemetry"]["map_capture_interval_ticks"]
+            ),
+            "TERRARIA_TELEMETRY_MAP_TILE_UPDATE_INTERVAL_TICKS": str(
+                config["telemetry"]["map_tile_update_interval_ticks"]
+            ),
+            "TERRARIA_TELEMETRY_WORLD_SCAN_INTERVAL_TICKS": str(
+                config["telemetry"]["world_scan_interval_ticks"]
             ),
             "TERRARIA_TELEMETRY_DEATH_RETENTION_SECONDS": str(
                 config["storage"]["death_retention_seconds"]

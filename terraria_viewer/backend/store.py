@@ -71,6 +71,9 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._players: dict[str, dict[str, Any]] = {}
         self._movement_cache: dict[str, dict[str, Any]] = {}
         self._movement_visited_tiles: dict[tuple[str, str], set[str]] = {}
+        self._movement_last_saved_at: dict[str, float] = {}
+        self._players_last_saved_monotonic = 0.0
+        self._metrics_last_saved_monotonic = 0.0
         self._online_player_ids: list[str] = []
         self._players_updated_at: float | None = None
         self._server_info: dict[str, Any] = {
@@ -97,6 +100,9 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._player_names: list[str] | None = None
         self._players_checked_at: float | None = None
         self._telemetry_received_at: float | None = None
+        self._telemetry_last_received_monotonic: float | None = None
+        self._telemetry_interval_ms: float | None = None
+        self._telemetry_snapshot_id: int | None = None
         self._active_npcs: list[NpcEntity] = []
         self._active_npcs_world_id: str | None = None
         self._active_coins: list[DroppedCoin] = []

@@ -67,7 +67,11 @@ const modules = await activateModules('world_map');
     requestActive = false,
     renderKey = '';
   let exploredPercent = 0,
-    pollTimer = null;
+    pollTimer = null,
+    livePollTimer = null,
+    liveRequestActive = false,
+    liveSince = 0,
+    mapRevision = 0;
   let mapViewActive = true;
   let fullMapEnabled = false;
   let debugWindowEnabled = false;
@@ -80,8 +84,8 @@ const modules = await activateModules('world_map');
       debugMode && localStorage.getItem('terraria-world-map-debug-window') === 'true';
   } catch {}
   try {
-    renderDebugWindowEnabled =
-      debugMode && localStorage.getItem('terraria-world-map-render-debug') === 'true';
+    const savedRenderDebugPreference = localStorage.getItem('terraria-world-map-render-debug');
+    renderDebugWindowEnabled = debugMode && savedRenderDebugPreference !== 'false';
   } catch {}
   let chunkOwners = new Map(),
     explorationImageCache = new Map(),
@@ -511,8 +515,17 @@ const modules = await activateModules('world_map');
     for (const chunk of data.base_chunks || []) {
       const x = Number(chunk.x),
         y = Number(chunk.y);
-      if (Number.isInteger(x) && Number.isInteger(y))
-        nextOwners.set(`${x},${y}`, { base: chunk.data, overlays: [] });
+      if (Number.isInteger(x) && Number.isInteger(y)) {
+        const key = `${x},${y}`;
+        const previous = previousOwners.get(key);
+        const keepPixelUpdates = previous?.base === chunk.data;
+        nextOwners.set(key, {
+          base: chunk.data,
+          overlays: [],
+          pixelUpdates: keepPixelUpdates ? previous.pixelUpdates : new Map(),
+          updateRevision: keepPixelUpdates ? previous.updateRevision || 0 : 0,
+        });
+      }
     }
     for (const player of players)
       for (const chunk of player.chunks || []) {
@@ -520,7 +533,12 @@ const modules = await activateModules('world_map');
           y = Number(chunk.y);
         if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
         const key = `${x},${y}`,
-          owner = nextOwners.get(key) || { base: null, overlays: [] };
+          owner = nextOwners.get(key) || {
+            base: null,
+            overlays: [],
+            pixelUpdates: new Map(),
+            updateRevision: 0,
+          };
         owner.overlays.push(chunk.data);
         nextOwners.set(key, owner);
       }
@@ -533,6 +551,7 @@ const modules = await activateModules('world_map');
         (before &&
           after &&
           before.base === after.base &&
+          before.updateRevision === after.updateRevision &&
           before.overlays.length === after.overlays.length &&
           before.overlays.every((value, index) => value === after.overlays[index]));
       if (!same) {
@@ -541,10 +560,114 @@ const modules = await activateModules('world_map');
       }
     }
     chunkOwners = nextOwners;
+    mapRevision = Number(data.map_revision) || mapRevision;
     if (changed) {
       baseMapRevision++;
     }
   };
+  const applyMapTileUpdates = (batches) => {
+    let changed = false;
+    for (const batch of batches) {
+      for (const update of batch.updates || []) {
+        const x = Number(update.x);
+        const y = Number(update.y);
+        const color = update.color;
+        if (
+          !Number.isInteger(x) ||
+          !Number.isInteger(y) ||
+          x < 0 ||
+          y < 0 ||
+          x >= data.world.width ||
+          y >= data.world.height ||
+          !Array.isArray(color) ||
+          color.length !== 4
+        )
+          continue;
+
+        const chunkX = Math.floor(x / chunkSize);
+        const chunkY = Math.floor(y / chunkSize);
+        const key = `${chunkX},${chunkY}`;
+        const owner = chunkOwners.get(key) || {
+          base: null,
+          overlays: [],
+          pixelUpdates: new Map(),
+          updateRevision: 0,
+        };
+        const pixelUpdates = owner.pixelUpdates || new Map();
+        const offset = (y % chunkSize) * chunkSize + (x % chunkSize);
+        pixelUpdates.set(offset, color as [number, number, number, number]);
+        owner.pixelUpdates = pixelUpdates;
+        owner.updateRevision = (owner.updateRevision || 0) + 1;
+        chunkOwners.set(key, owner);
+        overviewDirtyChunks.add(key);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      baseMapRevision++;
+      void buildOverview();
+      requestVisibleChunkRender();
+      queueMapSnapshotSave();
+    }
+  };
+  const renderLiveLayers = () => {
+    if (!data) return;
+    const players = playerPaths.withPaths(data.players || [], data.world);
+    const routed = modules['world_map.routes']
+      ? players.filter((player) => playerOptions(player).route)
+      : [];
+    const nextRouteKey = JSON.stringify(routed.map((player) => [player.id, player.pathKey]));
+    if (nextRouteKey !== routeKey) {
+      routeLayer.render(routed, data.players || []);
+      routeKey = nextRouteKey;
+    }
+
+    mapEntityLayer.setWorld(data.world);
+    const markerPlayers = modules['world_map.players']
+      ? players.filter((player) => player.online === true)
+      : [];
+    const nextMarkerKey = JSON.stringify(
+      markerPlayers.map((player) => [
+        player.id,
+        player.name,
+        player.avatar_url,
+        player.online,
+        player.team,
+        player.direction,
+        player.session_seconds,
+        player.position?.tileX,
+        player.position?.tileY,
+        player.position?.x,
+        player.position?.y,
+      ]),
+    );
+    if (nextMarkerKey !== markerKey) {
+      mapEntityLayer.drawMarkers(markerPlayers);
+      markerKey = nextMarkerKey;
+    }
+
+    const entityKey = modules['world_map.entities']
+      ? JSON.stringify(data.active_npcs || [])
+      : 'off';
+    if (entityKey !== entityRenderKey) {
+      mapEntityLayer.drawEntities(modules['world_map.entities'] ? data.active_npcs : []);
+      entityRenderKey = entityKey;
+    }
+    const coinKey = modules['world_map.coins'] ? JSON.stringify(data.coins || []) : 'off';
+    if (coinKey !== coinRenderKey) {
+      mapEntityLayer.drawDroppedCoins(modules['world_map.coins'] ? data.coins : []);
+      coinRenderKey = coinKey;
+    }
+    const deathKey = modules['world_map.players']
+      ? JSON.stringify([data.world?.id, data.deaths || []])
+      : 'off';
+    if (deathKey !== deathRenderKey) {
+      mapEntityLayer.drawDeaths(modules['world_map.players'] ? data.deaths : []);
+      deathRenderKey = deathKey;
+    }
+  };
+
   const render = async () => {
     const width = Number(data.world?.width),
       height = Number(data.world?.height),
@@ -590,57 +713,11 @@ const modules = await activateModules('world_map');
     if (rebuildMask) maskVersion++;
     drawOverview();
     void buildOverview();
-    const nextRouteKey = JSON.stringify(routed.map((player) => [player.id, player.pathKey]));
-    if (nextRouteKey !== routeKey) {
-      routeLayer.render(routed, data.players || []);
-      routeKey = nextRouteKey;
-    }
-    mapEntityLayer.setWorld(data.world);
-    const markerPlayers = modules['world_map.players']
-      ? players.filter((player) => player.online === true)
-      : [];
-    const nextMarkerKey = JSON.stringify(
-      markerPlayers.map((player) => [
-        player.id,
-        player.name,
-        player.avatar_url,
-        player.online,
-        player.team,
-        player.direction,
-        player.session_seconds,
-        player.position?.tileX,
-        player.position?.tileY,
-        player.position?.x,
-        player.position?.y,
-      ]),
-    );
-    if (nextMarkerKey !== markerKey) {
-      mapEntityLayer.drawMarkers(markerPlayers);
-      markerKey = nextMarkerKey;
-    }
+    renderLiveLayers();
     const pylonKey = modules['world_map.pylons'] ? JSON.stringify(data.pylons || []) : 'off';
     if (pylonKey !== pylonRenderKey) {
       mapEntityLayer.drawPylons(modules['world_map.pylons'] ? data.pylons : []);
       pylonRenderKey = pylonKey;
-    }
-    const entityKey = modules['world_map.entities']
-      ? JSON.stringify(data.active_npcs || [])
-      : 'off';
-    if (entityKey !== entityRenderKey) {
-      mapEntityLayer.drawEntities(modules['world_map.entities'] ? data.active_npcs : []);
-      entityRenderKey = entityKey;
-    }
-    const coinKey = modules['world_map.coins'] ? JSON.stringify(data.coins || []) : 'off';
-    if (coinKey !== coinRenderKey) {
-      mapEntityLayer.drawDroppedCoins(modules['world_map.coins'] ? data.coins : []);
-      coinRenderKey = coinKey;
-    }
-    const deathKey = modules['world_map.players']
-      ? JSON.stringify([data.world?.id, data.deaths || []])
-      : 'off';
-    if (deathKey !== deathRenderKey) {
-      mapEntityLayer.drawDeaths(modules['world_map.players'] ? data.deaths : []);
-      deathRenderKey = deathKey;
     }
     if (modules['world_map.spawn']) {
       mapEntityLayer.setWorld(data.world);
@@ -672,6 +749,7 @@ const modules = await activateModules('world_map');
       const params = new URLSearchParams();
       if (query) params.set('world', query);
       if (data?.updated_at) params.set('since', String(data.updated_at));
+      if (liveSince > 0) params.set('live_since', String(liveSince));
       const response = await fetchWithTimeout(
         `/api/world-map${params.size ? `?${params}` : ''}`,
         { cache: 'no-store' },
@@ -679,6 +757,11 @@ const modules = await activateModules('world_map');
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const next = await response.json();
+      for (const player of next.players || []) {
+        for (const point of player.positions || []) {
+          liveSince = Math.max(liveSince, Number(point.time) || 0);
+        }
+      }
       const sameWorld =
         data &&
         String(data.world?.id) === String(next.world?.id) &&
@@ -696,14 +779,26 @@ const modules = await activateModules('world_map');
           (data.players || []).map((player) => [player.id, player]),
         );
         next.players = (next.players || []).map((player) => {
-          const oldChunks = new Map<string, any>(
-            (previousPlayers.get(player.id)?.chunks || []).map((chunk) => [
-              `${chunk.x},${chunk.y}`,
-              chunk,
+          const previousPlayer = previousPlayers.get(player.id);
+          const oldPositions = new Map<string, any>(
+            (previousPlayer?.positions || []).map((point) => [
+              `${point.time}:${point.x}:${point.y}`,
+              point,
             ]),
           );
+          for (const point of player.positions || []) {
+            oldPositions.set(`${point.time}:${point.x}:${point.y}`, point);
+            liveSince = Math.max(liveSince, Number(point.time) || 0);
+          }
+          const oldChunks = new Map<string, any>(
+            (previousPlayer?.chunks || []).map((chunk) => [`${chunk.x},${chunk.y}`, chunk]),
+          );
           for (const chunk of player.chunks || []) oldChunks.set(`${chunk.x},${chunk.y}`, chunk);
-          return { ...player, chunks: [...oldChunks.values()] };
+          return {
+            ...player,
+            positions: [...oldPositions.values()].sort((left, right) => left.time - right.time),
+            chunks: [...oldChunks.values()],
+          };
         });
       }
       const key = JSON.stringify([
@@ -762,6 +857,11 @@ const modules = await activateModules('world_map');
       )
         return;
       data = cached.data;
+      for (const player of cached.data.players || []) {
+        for (const point of player.positions || []) {
+          liveSince = Math.max(liveSince, Number(point.time) || 0);
+        }
+      }
       renderDebugPanel?.setData(cached.data);
       baseMapRevision = Number(cached.baseMapRevision || 0);
       await render();
@@ -809,7 +909,108 @@ const modules = await activateModules('world_map');
         await refresh(false);
         scheduleRefresh();
       },
-      debugMode && $('map-settings').open ? 1000 : 5000,
+      Number(
+        data?.telemetry?.configured_intervals?.[
+          debugMode && $('map-settings').open
+            ? 'browser_debug_poll_interval_ms'
+            : 'browser_map_poll_interval_ms'
+        ],
+      ) || (debugMode && $('map-settings').open ? 1000 : 5000),
+    );
+  }
+  async function refreshLive() {
+    if (!mapViewActive || liveRequestActive) return;
+    liveRequestActive = true;
+    try {
+      const params = new URLSearchParams();
+      const requestedWorld = new URLSearchParams(location.search).get('world');
+      if (requestedWorld) params.set('world', requestedWorld);
+      if (liveSince > 0) params.set('since', String(liveSince));
+      params.set('map_since', String(mapRevision));
+      const response = await fetchWithTimeout(
+        `/api/world-map/live${params.size ? `?${params}` : ''}`,
+        { cache: 'no-store' },
+        10000,
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const responseText = await response.text();
+      const payload = JSON.parse(responseText);
+      if (!data || String(data.world?.id) !== String(payload.world?.id)) return;
+      if (payload.map_delta_reset) {
+        await refresh(false);
+        mapRevision = Number(data?.map_revision) || 0;
+        return;
+      }
+      applyMapTileUpdates(payload.map_tile_updates || []);
+      mapRevision = Number(payload.map_revision) || mapRevision;
+      data.map_revision = mapRevision;
+
+      const playersById = new Map<string, any>(
+        (data.players || []).map((player) => [player.id, player]),
+      );
+      for (const incoming of payload.players || []) {
+        const current = playersById.get(incoming.id) || {
+          chunks: [],
+          positions: [],
+          has_imported_map: false,
+        };
+        const positions = new Map<string, any>(
+          (current.positions || []).map((point) => [`${point.time}:${point.x}:${point.y}`, point]),
+        );
+        for (const point of incoming.positions || []) {
+          positions.set(`${point.time}:${point.x}:${point.y}`, point);
+          liveSince = Math.max(liveSince, Number(point.time) || 0);
+        }
+        playersById.set(incoming.id, {
+          ...current,
+          ...incoming,
+          positions: [...positions.values()].sort((left, right) => left.time - right.time),
+        });
+      }
+      const onlinePlayerIds = new Set(payload.online_player_ids || []);
+      data.players = [...playersById.values()].map((player) => ({
+        ...player,
+        online: onlinePlayerIds.has(player.id),
+        team: onlinePlayerIds.has(player.id) ? player.team : null,
+        direction: onlinePlayerIds.has(player.id) ? player.direction : null,
+        session_seconds: onlinePlayerIds.has(player.id) ? player.session_seconds : null,
+      }));
+      const deathsById = new Map<string, any>(
+        (data.deaths || []).map((death) => [death.id, death]),
+      );
+      for (const death of payload.deaths || []) {
+        deathsById.set(death.id, death);
+        liveSince = Math.max(liveSince, Number(death.timestamp) || 0);
+      }
+      data.deaths = [...deathsById.values()];
+      data.active_npcs = payload.active_npcs || [];
+      data.coins = payload.coins || [];
+      data.telemetry = payload.telemetry;
+      data.live_payload_bytes = new Blob([responseText]).size;
+      data.live_updated_at = payload.updated_at;
+      renderDebugPanel?.setData(data);
+      const renderStartedAt = performance.now();
+      renderLiveLayers();
+      data.live_render_ms = performance.now() - renderStartedAt;
+      renderScanStatus();
+    } catch (error) {
+      console.warn('Live map update failed:', error);
+    } finally {
+      liveRequestActive = false;
+    }
+  }
+  function scheduleLiveRefresh() {
+    clearTimeout(livePollTimer);
+    if (!mapViewActive) return;
+    livePollTimer = setTimeout(
+      async () => {
+        await refreshLive();
+        scheduleLiveRefresh();
+      },
+      Math.max(
+        100,
+        Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 500,
+      ),
     );
   }
   if (debugMode) {
@@ -1001,15 +1202,32 @@ const modules = await activateModules('world_map');
     const cacheDeadline = new Promise((resolve) => setTimeout(resolve, 2500));
     Promise.race([restore, cacheDeadline])
       .then(() => refresh(true))
-      .then(scheduleRefresh);
+      .then(() => refreshLive())
+      .then(() => {
+        scheduleRefresh();
+        scheduleLiveRefresh();
+      });
   } else {
-    restoreCachedMap().finally(() => refresh(true).then(scheduleRefresh));
+    restoreCachedMap().finally(() =>
+      refresh(true)
+        .then(() => refreshLive())
+        .then(() => {
+          scheduleRefresh();
+          scheduleLiveRefresh();
+        }),
+    );
   }
   window.addEventListener('terraria:view-change', (event) => {
     mapViewActive = (event as CustomEvent<{ view?: string }>).detail?.view === 'map';
     clearTimeout(pollTimer);
+    clearTimeout(livePollTimer);
     if (mapViewActive) {
-      refresh(false).finally(scheduleRefresh);
+      refresh(false)
+        .then(() => refreshLive())
+        .finally(() => {
+          scheduleRefresh();
+          scheduleLiveRefresh();
+        });
     }
   });
 })();
