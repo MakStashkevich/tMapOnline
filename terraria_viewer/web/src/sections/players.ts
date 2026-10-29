@@ -25,7 +25,7 @@ export async function mount(root: HTMLElement): Promise<void> {
   root.replaceChildren();
   const summary = document.createElement('div');
   summary.className = 'section-summary';
-  summary.textContent = `Сейчас онлайн: ${data.online?.count ?? 0} · Всего игроков: ${(data.players || []).length}`;
+  summary.textContent = `Сейчас онлайн: ${data.online?.count ?? 0} — Всего игроков: ${(data.players || []).length}`;
   root.append(summary);
   const list = document.createElement('div');
   list.className = 'player-cards';
@@ -64,11 +64,11 @@ export async function mount(root: HTMLElement): Promise<void> {
     }
     card.append(header);
     const stats = document.createElement('p');
-    stats.textContent = `Всего в игре: ${formatDuration(player.total_seconds)} · Сессий: ${(player.sessions || []).length} · Впервые: ${formatDate(player.first_seen_at)} · Последний раз: ${formatDate(player.last_seen_at)}`;
+    stats.textContent = `Всего в игре: ${formatDuration(player.total_seconds)} — Сессий: ${(player.sessions || []).length} — Впервые: ${formatDate(player.first_seen_at)} — Последний раз: ${formatDate(player.last_seen_at)}`;
     card.append(stats);
     const identity = document.createElement('p');
     identity.className = 'player-identity';
-    identity.textContent = `UUID: ${player.uuid || 'не получен, учёт по нику'} · Смерти: ${player.deaths ?? '—'} · PvP: ${player.pvp_deaths ?? '—'}`;
+    identity.textContent = `UUID: ${player.uuid || 'не получен, учёт по нику'} — Смерти: ${player.deaths ?? '—'} — PvP: ${player.pvp_deaths ?? '—'}`;
     card.append(identity);
     const sessions = document.createElement('details');
     const summary = document.createElement('summary');
@@ -79,7 +79,7 @@ export async function mount(root: HTMLElement): Promise<void> {
     for (const session of [...(player.sessions || [])].reverse()) {
       const row = document.createElement('div');
       row.className = 'session-row';
-      row.textContent = `${formatDate(session.started_at)} — ${session.ended_at ? formatDate(session.ended_at) : 'сейчас'} · ${formatDuration(session.duration_seconds)}`;
+      row.textContent = `${formatDate(session.started_at)} — ${session.ended_at ? formatDate(session.ended_at) : 'сейчас'} — ${formatDuration(session.duration_seconds)}`;
       rows.append(row);
     }
     if (!rows.childElementCount) rows.textContent = 'Сессий пока нет';

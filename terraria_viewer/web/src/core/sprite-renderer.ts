@@ -1,16 +1,5 @@
 const imagePromises = new Map<string, Promise<HTMLImageElement | null>>();
 
-// This tiny pixel portrait keeps player lists readable when no appearance has been exported yet.
-const DEFAULT_PLAYER_SPRITE =
-  'data:image/svg+xml;charset=utf-8,' +
-  encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="24" viewBox="0 0 20 24" shape-rendering="crispEdges">
-    <path fill="#49372f" d="M4 2h11v2h2v3h1v8h-2v-2h-2V9H8v3H5v3H2V6h2z"/>
-    <path fill="#e6b38a" d="M5 6h10v2h2v7h-2v4H6v-3H4V9h1z"/>
-    <path fill="#49372f" d="M5 17h2v2h7v-2h2v4H5z"/>
-    <path fill="#547b9d" d="M12 9h2v4h-2z"/>
-    <path fill="#ffffff" d="M12 9h1v2h-1z"/>
-  </svg>`);
-
 const TEAM_COLORS: Record<number, string> = {
   0: '#ffffff',
   1: '#da3b3b',
@@ -40,10 +29,6 @@ export function loadSprite(source: string): Promise<HTMLImageElement | null> {
     if (!image && imagePromises.get(source) === request) imagePromises.delete(source);
   });
   return request;
-}
-
-export function defaultPlayerSprite(): string {
-  return DEFAULT_PLAYER_SPRITE;
 }
 
 export function playerOutlineColor(team: number | null | undefined): string {

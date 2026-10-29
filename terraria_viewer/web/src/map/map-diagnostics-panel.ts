@@ -91,17 +91,17 @@ export class MapDiagnosticsPanel {
     );
     const lines = [
       'ОТЛАДКА КАРТЫ',
-      `Мир: ${world.name || scan.worldName || '—'} · ID ${world.id ?? scan.worldId ?? '—'}`,
+      `Мир: ${world.name || scan.worldName || '—'} — ID ${world.id ?? scan.worldId ?? '—'}`,
       `Размер: ${mapWidth.toLocaleString('ru-RU')} × ${mapHeight.toLocaleString('ru-RU')} тайлов`,
       `Исследовано игроками: ${exploredPercent.toFixed(2)}%`,
       `Сканер: ${!data?.scan ? 'нет данных' : scan.complete ? 'завершён' : scan.active ? 'работает' : scan.stale ? 'нет связи / данные устарели' : 'приостановлен'}`,
-      `Участки: ${Number(scan.scannedChunks || 0).toLocaleString('ru-RU')} отсканировано · ${Number(scan.attemptedChunks || 0).toLocaleString('ru-RU')} обработано · ${Number(scan.remainingChunks || 0).toLocaleString('ru-RU')} осталось`,
-      `Ошибки сканирования: ${Number(scan.failedChunks || 0).toLocaleString('ru-RU')} · всего: ${Number(scan.totalChunks || 0).toLocaleString('ru-RU')}`,
-      `Кэш браузера: ${(data?.base_chunks || []).length.toLocaleString('ru-RU')} участков · режим всей карты: ${fullMapEnabled ? 'вкл' : 'выкл'}`,
+      `Участки: ${Number(scan.scannedChunks || 0).toLocaleString('ru-RU')} отсканировано — ${Number(scan.attemptedChunks || 0).toLocaleString('ru-RU')} обработано — ${Number(scan.remainingChunks || 0).toLocaleString('ru-RU')} осталось`,
+      `Ошибки сканирования: ${Number(scan.failedChunks || 0).toLocaleString('ru-RU')} — всего: ${Number(scan.totalChunks || 0).toLocaleString('ru-RU')}`,
+      `Кэш браузера: ${(data?.base_chunks || []).length.toLocaleString('ru-RU')} участков — режим всей карты: ${fullMapEnabled ? 'вкл' : 'выкл'}`,
       `Игроки с координатами: ${activePlayers.length}/${players.length}`,
       ...players.map(
         (player) =>
-          `  ${player.name || player.id}: ${player.position?.tileX ?? '—'}, ${player.position?.tileY ?? '—'} · позиции ${player.positions?.length || 0} · участки ${player.chunks?.length || 0}`,
+          `  ${player.name || player.id}: ${player.position?.tileX ?? '—'}, ${player.position?.tileY ?? '—'} — позиции ${player.positions?.length || 0} — участки ${player.chunks?.length || 0}`,
       ),
     ];
     panel.textContent = lines.join('\n');

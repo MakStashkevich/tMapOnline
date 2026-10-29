@@ -84,7 +84,7 @@ export async function mount(root: HTMLElement): Promise<void> {
   const section = document.createElement('section');
   section.className = 'section-block';
   const heading = document.createElement('h3');
-  heading.textContent = 'События и ошибки · 24 часа';
+  heading.textContent = 'События и ошибки — 24 часа';
   section.append(heading);
   const events = document.createElement('div');
   events.className = 'event-list';
@@ -93,7 +93,7 @@ export async function mount(root: HTMLElement): Promise<void> {
     row.className = `event-row ${event.severity || ''}`;
     const meta = document.createElement('div');
     meta.className = 'event-meta';
-    meta.textContent = `${event.source || 'Событие'} · ${event.time ? new Date(Number(event.time) * 1000).toLocaleString('ru-RU') : '—'}`;
+    meta.textContent = `${event.source || 'Событие'} — ${event.time ? new Date(Number(event.time) * 1000).toLocaleString('ru-RU') : '—'}`;
     const message = document.createElement('p');
     message.textContent = event.message || '';
     row.append(meta, message);

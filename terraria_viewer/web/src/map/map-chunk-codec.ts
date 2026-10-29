@@ -13,6 +13,10 @@ export class MapChunkCodec {
     this.decodedChunks.clear();
   }
 
+  getCachedChunkCount(): number {
+    return this.decodedChunks.size;
+  }
+
   async compose(source: MapChunkSource, chunkSize: number): Promise<Uint8Array> {
     const expectedLength = chunkSize * chunkSize * 4;
     const basePixels = source.base

@@ -10,6 +10,7 @@ const targets: Record<FeaturePage, FeatureMap> = {
     'world_map.entities': ['#entities'],
     'world_map.coins': ['#coins'],
     'world_map.pylons': ['#pylons'],
+    'world_map.spawn': ['#spawn'],
     'world_map.debug': ['#map-settings-button', '#map-settings', '#map-debug-window'],
     'world_map.tooltips': ['#map-tooltip'],
   },

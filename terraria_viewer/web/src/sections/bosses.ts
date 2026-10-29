@@ -259,7 +259,7 @@ export async function mount(root: HTMLElement): Promise<void> {
     const section = document.createElement('section');
     section.className = 'section-block';
     const heading = document.createElement('h3');
-    heading.textContent = `${title} · ${items.length}`;
+    heading.textContent = `${title} — ${items.length}`;
     section.append(heading);
     const list = document.createElement('div');
     list.className = 'boss-list';
@@ -300,6 +300,6 @@ export async function mount(root: HTMLElement): Promise<void> {
   }
   const world = document.createElement('p');
   world.className = 'section-footnote';
-  world.textContent = `Мир: ${info.world || '—'} · Режим: ${info.game_mode || '—'}${info.hardmode ? ' · Хардмод' : ''}${info.crimson ? ' · Багрянец' : ''}`;
+  world.textContent = `Мир: ${info.world || '—'} — Режим: ${info.game_mode || '—'}${info.hardmode ? ' — Хардмод' : ''}${info.crimson ? ' — Багрянец' : ''}`;
   root.append(world);
 }

@@ -147,6 +147,101 @@
 #map-debug-window[hidden] {
   display: none;
 }
+#map-render-debug-window.render-debug-panel {
+  position: fixed;
+  z-index: 2;
+  right: 74px;
+  bottom: 18px;
+  display: grid;
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 110px));
+  max-height: min(70dvh, 620px);
+  overflow: auto;
+  padding: 16px;
+  color: var(--text);
+  background: #101821f2;
+  border: 1px solid #40566a;
+  border-radius: 14px;
+  box-shadow: 0 8px 28px #0009;
+  font:
+    12px/1.4 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+}
+#map-render-debug-window[hidden] {
+  display: none;
+}
+.render-debug-heading,
+.render-debug-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.render-debug-heading {
+  font-size: 14px;
+}
+.render-debug-live {
+  padding: 3px 7px;
+  color: #7de3b4;
+  background: #1b3a31;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+.render-debug-section-title {
+  padding-top: 8px;
+  color: var(--muted);
+  border-top: 1px solid #293947;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.render-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.render-debug-card {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 10px 11px;
+  background: #192531;
+  border: 1px solid #2d4050;
+  border-radius: 10px;
+}
+.render-debug-label,
+.render-debug-row > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.render-debug-card > strong {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.render-debug-card > small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.render-debug-rows {
+  display: grid;
+  gap: 7px;
+}
+.render-debug-row {
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+.render-debug-row > strong {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 .setting-option {
   display: flex;
   align-items: flex-start;

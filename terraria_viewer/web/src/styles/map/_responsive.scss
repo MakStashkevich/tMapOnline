@@ -54,6 +54,17 @@
     max-height: 35dvh;
     font-size: 11px;
   }
+  #map-render-debug-window {
+    right: 58px;
+    bottom: 10px;
+    width: min(420px, calc(100vw - 78px));
+    max-height: 55dvh;
+    padding: 10px 12px;
+    font-size: 10px;
+  }
+  #map-debug-window:not([hidden]) ~ #map-render-debug-window {
+    bottom: calc(10px + 35dvh + 10px);
+  }
   .marker {
     gap: 4px;
     padding: 3px 7px 3px 3px;

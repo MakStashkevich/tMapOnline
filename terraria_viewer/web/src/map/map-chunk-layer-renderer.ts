@@ -26,6 +26,8 @@ export class MapChunkLayerRenderer {
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
   private renderRunning = false;
   private renderPending = false;
+  private lastRenderDurationMs = 0;
+  private lastRenderChunkCount = 0;
 
   constructor(private readonly options: ChunkLayerOptions) {}
 
@@ -56,6 +58,28 @@ export class MapChunkLayerRenderer {
     this.options.codec.clear();
   }
 
+  getDebugMetrics(): {
+    visibleCanvases: number;
+    lastRenderDurationMs: number;
+    lastRenderChunkCount: number;
+    rendering: boolean;
+    canvasBytes: number;
+    decodedChunkCount: number;
+  } {
+    let canvasBytes = 0;
+    for (const canvas of this.canvases.values()) {
+      canvasBytes += canvas.width * canvas.height * 4;
+    }
+    return {
+      visibleCanvases: this.canvases.size,
+      lastRenderDurationMs: this.lastRenderDurationMs,
+      lastRenderChunkCount: this.lastRenderChunkCount,
+      rendering: this.renderRunning,
+      canvasBytes,
+      decodedChunkCount: this.options.codec.getCachedChunkCount(),
+    };
+  }
+
   invalidateExplorationMask(): void {
     for (const canvas of this.canvases.values()) canvas.dataset.maskVersion = '';
   }
@@ -70,10 +94,13 @@ export class MapChunkLayerRenderer {
     this.renderRunning = true;
     do {
       this.renderPending = false;
+      const startedAt = performance.now();
       try {
         await this.renderVisibleChunks();
       } catch (error) {
         this.options.onError(error);
+      } finally {
+        this.lastRenderDurationMs = performance.now() - startedAt;
       }
     } while (this.renderPending);
     this.renderRunning = false;
@@ -88,6 +115,7 @@ export class MapChunkLayerRenderer {
     const scale = this.options.getScale();
     if (scale < this.options.getFitScale() * 4) {
       this.removeAllCanvases();
+      this.lastRenderChunkCount = 0;
       return;
     }
 
@@ -117,6 +145,7 @@ export class MapChunkLayerRenderer {
         visible.set(key, source);
       }
     }
+    this.lastRenderChunkCount = visible.size;
 
     for (const [key, canvas] of this.canvases) {
       if (!visible.has(key)) {

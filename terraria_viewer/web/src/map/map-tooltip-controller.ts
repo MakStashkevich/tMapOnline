@@ -86,7 +86,7 @@ export class MapTooltipController {
         if (token !== this.hoverToken) return;
         const gameTime =
           sessionSeconds === null ? 'время не получено' : this.formatGameTime(sessionSeconds);
-        this.show(cursor, object.title, `Играет ${gameTime} · ${object.description}`);
+        this.show(cursor, object.title, `Играет ${gameTime} — ${object.description}`);
         return;
       }
       this.show(cursor, object.title, object.description);
@@ -106,7 +106,7 @@ export class MapTooltipController {
     const details = [`Плитка ${x}, ${y}`];
     if (info.wall_name) details.push(`Стена: ${info.wall_name}`);
     else if (info.wall_id != null) details.push('Неизвестная стена');
-    this.show(cursor, title, details.join(' · '));
+    this.show(cursor, title, details.join(' — '));
   }
 
   private isPixelHidden(x: number, y: number): boolean {
@@ -174,7 +174,7 @@ export class MapTooltipController {
         return {
           key: `coin:${coin.id}:${coin.type}`,
           title: `${coin.name || 'Монета'} × ${Number(coin.stack || 0).toLocaleString('ru-RU')}`,
-          description: `Выпала на земле · плитка ${Math.floor(coinX)}, ${Math.floor(coinY)}`,
+          description: `Выпала на земле — плитка ${Math.floor(coinX)}, ${Math.floor(coinY)}`,
         };
       }
     }
@@ -186,7 +186,7 @@ export class MapTooltipController {
         return {
           key: `entity:${entity.id}`,
           title: entity.name || (entity.boss ? 'Босс' : 'NPC'),
-          description: `${entity.boss ? 'Босс' : 'NPC'} · плитка ${Math.floor(entityX)}, ${Math.floor(entityY)}`,
+          description: `${entity.boss ? 'Босс' : 'NPC'} — плитка ${Math.floor(entityX)}, ${Math.floor(entityY)}`,
         };
       }
     }
@@ -198,7 +198,7 @@ export class MapTooltipController {
         return {
           key: `pylon:${pylon.x},${pylon.y}`,
           title: details[0],
-          description: `Пилон биома · плитка ${pylon.x}, ${pylon.y}`,
+          description: `Пилон биома — плитка ${pylon.x}, ${pylon.y}`,
         };
       }
     }
@@ -233,7 +233,7 @@ export class MapTooltipController {
       return {
         key: 'spawn',
         title: 'Точка появления игрока',
-        description: `Место появления в мире · плитка ${spawnX}, ${spawnY}`,
+        description: `Место появления в мире — плитка ${spawnX}, ${spawnY}`,
       };
     }
 

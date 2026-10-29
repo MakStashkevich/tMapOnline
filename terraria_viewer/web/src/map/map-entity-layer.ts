@@ -1,9 +1,4 @@
-import {
-  createOutlinedSprite,
-  defaultPlayerSprite,
-  loadSprite,
-  playerOutlineColor,
-} from '../core/sprite-renderer';
+import { createOutlinedSprite, loadSprite, playerOutlineColor } from '../core/sprite-renderer';
 
 const PYLON_TYPES: Record<string, string[]> = {
   Purity: ['Пилон леса', '#8be58e', 'Forest'],
@@ -101,18 +96,66 @@ export class MapEntityLayer {
     const container = document.createElement('span');
     container.className = 'player-toggle-avatar';
     container.setAttribute('aria-hidden', 'true');
+    container.append(this.createAvatarLoader());
     void this.renderPlayerAvatar(container, player);
     return container;
   }
 
   private async renderPlayerAvatar(container: HTMLElement, player: MapPlayerMarker): Promise<void> {
-    const source =
-      (await loadSprite(player.avatar_url || '')) || (await loadSprite(defaultPlayerSprite()));
-    if (!source || !container.isConnected) return;
-    const sprite = createOutlinedSprite(source, playerOutlineColor(player.team));
-    if (!sprite) return;
+    const source = player.avatar_url ? await loadSprite(player.avatar_url) : null;
+    if (source && container.isConnected) {
+      container.replaceChildren(this.createRawPlayerSprite(source));
+      return;
+    }
+    await this.loadPlayerAvatarFromSavedAppearance(container, player.id);
+  }
+
+  private async loadPlayerAvatarFromSavedAppearance(
+    container: HTMLElement,
+    playerId: string,
+  ): Promise<void> {
+    if (!container.isConnected) return;
+
+    try {
+      const query = new URLSearchParams({ id: playerId });
+      const response = await fetch(`/api/player-avatar?${query}`, { cache: 'no-store' });
+      if (response.ok) {
+        const payload = (await response.json()) as { avatar_url?: string };
+        if (payload.avatar_url) {
+          const source = await loadSprite(payload.avatar_url);
+          if (source && container.isConnected) {
+            container.replaceChildren(this.createRawPlayerSprite(source));
+            return;
+          }
+        }
+      }
+    } catch {
+      // Keep the loader visible and retry while the map menu is still mounted.
+    }
+
+    if (container.isConnected) {
+      window.setTimeout(() => {
+        void this.loadPlayerAvatarFromSavedAppearance(container, playerId);
+      }, 2500);
+    }
+  }
+
+  private createAvatarLoader(): HTMLElement {
+    const loader = document.createElement('span');
+    loader.className = 'player-avatar-loader';
+    for (let pixel = 0; pixel < 16; pixel += 1) {
+      loader.append(document.createElement('span'));
+    }
+    return loader;
+  }
+
+  private createRawPlayerSprite(source: HTMLImageElement): HTMLImageElement {
+    const sprite = document.createElement('img');
     sprite.className = 'player-toggle-avatar-sprite';
-    container.replaceChildren(sprite);
+    sprite.alt = '';
+    sprite.decoding = 'async';
+    sprite.src = source.src;
+    return sprite;
   }
 
   drawMarkers(players: MapPlayerMarker[]) {
@@ -132,8 +175,8 @@ export class MapEntityLayer {
     point: { x: number; y: number },
     renderVersion: number,
   ): Promise<void> {
-    const source =
-      (await loadSprite(player.avatar_url || '')) || (await loadSprite(defaultPlayerSprite()));
+    if (!player.avatar_url) return;
+    const source = await loadSprite(player.avatar_url);
     if (!source || renderVersion !== this.playerRenderVersion) return;
     const sprite = createOutlinedSprite(source, playerOutlineColor(player.team));
     if (!sprite) return;
@@ -356,7 +399,7 @@ export class MapEntityLayer {
     layer.append(marker);
   }
   drawSpawn(world: MapEntityWorld) {
-    const layer = this.layer('pylons'),
+    const layer = this.layer('spawn'),
       key = JSON.stringify([world?.spawn_x, world?.spawn_y, world?.width, world?.height]);
     // The feature toggle can remove the element without changing its coordinates.
     // Confirm the node still exists before treating the cached render as current.

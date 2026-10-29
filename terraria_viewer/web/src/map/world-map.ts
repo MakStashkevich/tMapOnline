@@ -12,6 +12,7 @@ import { MapChunkLayerRenderer } from './map-chunk-layer-renderer';
 import { MapExplorationMask } from './map-exploration-mask';
 import { MapOverviewRenderer } from './map-overview-renderer';
 import { MapImageExporter } from './map-image-exporter';
+import { MapRenderDebugPanel } from './map-render-debug-panel';
 
 const modules = await activateModules('world_map');
 
@@ -36,8 +37,9 @@ const modules = await activateModules('world_map');
         <section class="scan-panel"><div class="scan-title">Карта игрока</div><div>Загрузите файл <code>.map</code>, скачайте текущую карту или удалите импортированное открытие. При новой загрузке открытые области объединяются; очистка удаляет только импорт, собранное модом по перемещениям остаётся.</div><div class="map-import-row"><select id="map-import-player" aria-label="Игрок для импорта, скачивания или очистки"></select><button id="map-import-button" type="button">Выбрать .map</button><input id="map-import-file" type="file" accept=".map,application/octet-stream" hidden></div><div class="map-import-row"><button class="download-player-map" id="download-player-map" type="button" hidden>Скачать текущую карту .map</button></div><div class="map-import-row"><button class="clear-imported-map" id="clear-imported-map" type="button" hidden>Очистить загруженную карту</button></div><div id="map-import-status" role="status"></div></section>
         <label class="setting-option"><input id="full-map-toggle" type="checkbox"><span><strong>Показывать всю карту</strong><small>Показывает все уже отсканированные участки мира, включая не исследованные игроками.</small></span></label>
         <label class="setting-option"><input id="map-debug-toggle" type="checkbox"><span><strong>Показывать отладочное окно</strong><small>Постоянная панель слева снизу с состоянием карты и сканера.</small></span></label>
+        <label class="setting-option"><input id="map-render-debug-toggle" type="checkbox"><span><strong>Нагрузка веб-рендера</strong><small>FPS, длительность задач, чанки и оценка памяти браузерных холстов.</small></span></label>
       </div>
-    </dialog><pre id="map-debug-window" aria-live="polite" hidden></pre>`,
+    </dialog><pre id="map-debug-window" aria-live="polite" hidden></pre><section id="map-render-debug-window" class="render-debug-panel" aria-live="polite" hidden></section>`,
     );
     renderIcons(document.querySelector('#map-settings'));
     renderIcons(document.querySelector('#map-settings-button'));
@@ -69,12 +71,17 @@ const modules = await activateModules('world_map');
   let mapViewActive = true;
   let fullMapEnabled = false;
   let debugWindowEnabled = false;
+  let renderDebugWindowEnabled = false;
   try {
     fullMapEnabled = localStorage.getItem('terraria-world-map-show-full') === 'true';
   } catch {}
   try {
     debugWindowEnabled =
       debugMode && localStorage.getItem('terraria-world-map-debug-window') === 'true';
+  } catch {}
+  try {
+    renderDebugWindowEnabled =
+      debugMode && localStorage.getItem('terraria-world-map-render-debug') === 'true';
   } catch {}
   let chunkOwners = new Map(),
     explorationImageCache = new Map(),
@@ -151,6 +158,20 @@ const modules = await activateModules('world_map');
       ),
     maskScale: MASK_SCALE,
   });
+  const renderDebugPanel = debugMode
+    ? new MapRenderDebugPanel($('map-render-debug-window'), () => {
+        const preview = $('map-preview');
+        const mask = maskCanvas;
+        return {
+          ...chunkLayerRenderer.getDebugMetrics(),
+          extraCanvasBytes:
+            (preview instanceof HTMLCanvasElement ? preview.width * preview.height * 4 : 0) +
+            (mask ? mask.width * mask.height * 4 : 0),
+          spawnMarkerVisible: Boolean($('spawn')?.querySelector('.spawn-marker')),
+        };
+      })
+    : null;
+  renderDebugPanel?.setEnabled(renderDebugWindowEnabled);
   const mapEntityLayer = new MapEntityLayer($('stage'));
   const routeLayer = new MapRouteLayer($('route-layer'), colors);
   const mapDiagnostics = new MapDiagnosticsPanel(Boolean(debugMode));
@@ -624,12 +645,12 @@ const modules = await activateModules('world_map');
     if (modules['world_map.spawn']) {
       mapEntityLayer.setWorld(data.world);
       mapEntityLayer.drawSpawn(data.world);
-    } else $('pylons').querySelector('.spawn-marker')?.remove();
+    } else $('spawn').querySelector('.spawn-marker')?.remove();
     $('title').textContent = data.world?.name
-      ? `Карта мира · ${data.world.name}`
+      ? `Карта мира — ${data.world.name}`
       : 'Карта исследования';
     $('subtitle').textContent =
-      `${width.toLocaleString('ru-RU')} × ${height.toLocaleString('ru-RU')} тайлов · изучено ${Math.round(exploredPercent)}% карты`;
+      `${width.toLocaleString('ru-RU')} × ${height.toLocaleString('ru-RU')} тайлов — изучено ${Math.round(exploredPercent)}% карты`;
     renderToggles();
     updateMapImportOptions();
     const hasMap =
@@ -709,6 +730,7 @@ const modules = await activateModules('world_map');
         oldLeft = $('viewport').scrollLeft,
         oldTop = $('viewport').scrollTop;
       data = next;
+      renderDebugPanel?.setData(next);
       await render();
       if (initial || !renderKey) focusMap();
       else {
@@ -740,6 +762,7 @@ const modules = await activateModules('world_map');
       )
         return;
       data = cached.data;
+      renderDebugPanel?.setData(cached.data);
       baseMapRevision = Number(cached.baseMapRevision || 0);
       await render();
       overviewRenderer.resetWorld(Number(data.world.width) || 1, Number(data.world.height) || 1);
@@ -817,6 +840,14 @@ const modules = await activateModules('world_map');
         localStorage.setItem('terraria-world-map-debug-window', String(debugWindowEnabled));
       } catch {}
       renderScanStatus();
+    });
+    $('map-render-debug-toggle').checked = renderDebugWindowEnabled;
+    $('map-render-debug-toggle').addEventListener('change', (event) => {
+      renderDebugWindowEnabled = event.currentTarget.checked;
+      try {
+        localStorage.setItem('terraria-world-map-render-debug', String(renderDebugWindowEnabled));
+      } catch {}
+      renderDebugPanel?.setEnabled(renderDebugWindowEnabled);
     });
     $('map-import-button').addEventListener('click', () => {
       $('map-import-file').click();

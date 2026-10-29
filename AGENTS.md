@@ -15,6 +15,7 @@
 - Use descriptive names and normal formatting. Add short English comments at important boundaries and non-obvious algorithms, especially thread affinity, concurrency, persistence, protocol framing, and rendering/cache behavior. Do not comment obvious syntax line by line.
 - Give public collaborators narrow constructor dependencies and explicit methods. Keep DOM access out of data services and keep HTTP/socket/file effects out of presentation objects where practical.
 - Handle failures at the boundary that can recover or report them. Do not turn a failed read into valid-looking empty world data.
+- Do not use the middle-dot character in user-facing interface text. Separate values with spacing, commas, labels, or line breaks instead.
 
 ## Terraria source reference
 
