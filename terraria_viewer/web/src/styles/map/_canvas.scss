@@ -46,11 +46,8 @@
 .map-chunk {
   position: absolute;
   display: block;
-  image-rendering: auto;
-  pointer-events: none;
-}
-.map-stage.pixelated .map-chunk {
   image-rendering: pixelated;
+  pointer-events: none;
 }
 #paths {
   overflow: hidden;

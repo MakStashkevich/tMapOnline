@@ -15,7 +15,6 @@ type ChunkLayerOptions = {
   getMaskVersion: () => number;
   isFullMapEnabled: () => boolean;
   getChunkOwners: () => Map<string, MapChunkSource>;
-  drawOverview: () => void;
   onError: (error: unknown) => void;
   maskScale: number;
 };
@@ -111,7 +110,6 @@ export class MapChunkLayerRenderer {
     const maskCanvas = this.options.getMaskCanvas();
     if (!world || !maskCanvas) return;
 
-    this.options.drawOverview();
     const scale = this.options.getScale();
     if (scale < this.options.getFitScale() * 4) {
       this.removeAllCanvases();
@@ -135,14 +133,18 @@ export class MapChunkLayerRenderer {
       world.height,
       (viewport.scrollTop + viewport.clientHeight - contentTop) / scale + chunkSize,
     );
+    const owners = this.options.getChunkOwners();
     const visible = new Map<string, MapChunkSource>();
+    const firstChunkX = Math.max(0, Math.floor(left / chunkSize));
+    const firstChunkY = Math.max(0, Math.floor(top / chunkSize));
+    const endChunkX = Math.min(Math.ceil(world.width / chunkSize), Math.ceil(right / chunkSize));
+    const endChunkY = Math.min(Math.ceil(world.height / chunkSize), Math.ceil(bottom / chunkSize));
 
-    for (const [key, source] of this.options.getChunkOwners()) {
-      const [chunkX, chunkY] = this.parseKey(key);
-      const x = chunkX * chunkSize;
-      const y = chunkY * chunkSize;
-      if (x + chunkSize > left && x < right && y + chunkSize > top && y < bottom) {
-        visible.set(key, source);
+    for (let chunkY = firstChunkY; chunkY < endChunkY; chunkY++) {
+      for (let chunkX = firstChunkX; chunkX < endChunkX; chunkX++) {
+        const key = `${chunkX},${chunkY}`;
+        const source = owners.get(key);
+        if (source) visible.set(key, source);
       }
     }
     this.lastRenderChunkCount = visible.size;

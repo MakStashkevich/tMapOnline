@@ -156,7 +156,6 @@ const modules = await activateModules('world_map');
     getMaskVersion: () => maskVersion,
     isFullMapEnabled: () => fullMapEnabled,
     getChunkOwners: () => chunkOwners,
-    drawOverview: () => drawOverview(),
     onError: (error) =>
       status(
         `Не удалось отрисовать карту: ${error instanceof Error ? error.message : String(error)}`,
