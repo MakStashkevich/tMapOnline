@@ -29,6 +29,39 @@
   max-height: none;
   image-rendering: pixelated;
 }
+.player-avatar-loader {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  image-rendering: pixelated;
+}
+.player-avatar-loader span {
+  background: var(--shell-muted);
+  opacity: 0.2;
+  animation: player-avatar-pixel 1.2s steps(2, end) infinite;
+}
+.player-avatar-loader span:nth-child(4n + 1) {
+  animation-delay: -0.9s;
+}
+.player-avatar-loader span:nth-child(4n + 2) {
+  animation-delay: -0.6s;
+}
+.player-avatar-loader span:nth-child(4n + 3) {
+  animation-delay: -0.3s;
+}
+@keyframes player-avatar-pixel {
+  0%,
+  100% {
+    opacity: 0.16;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+}
 .viewer-card h3 {
   flex: 1;
   margin: 0;

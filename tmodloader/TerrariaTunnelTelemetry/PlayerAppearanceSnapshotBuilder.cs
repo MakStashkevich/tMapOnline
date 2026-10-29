@@ -35,6 +35,9 @@ internal static class PlayerAppearanceSnapshotBuilder
             ["legs"] = ReadPlayerInt(player, "legs"),
             ["hair"] = ReadPlayerInt(player, "hair"),
             ["beard"] = ReadPlayerInt(player, "beard"),
+            ["face"] = ReadPlayerInt(player, "face"),
+            ["faceHead"] = ReadPlayerInt(player, "faceHead"),
+            ["faceFlower"] = ReadPlayerInt(player, "faceFlower"),
             ["skinVariant"] = ReadPlayerInt(player, "skinVariant"),
             ["hairColor"] = ReadPlayerColor(player, "hairColor"),
             ["skinColor"] = ReadPlayerColor(player, "skinColor"),
@@ -382,24 +385,52 @@ internal static class PlayerAppearanceSnapshotBuilder
         result["hideHair"] = arguments[2] is true;
         result["backHairDraw"] = arguments[3] is true;
         result["backHairWithoutHeadgear"] = arguments[4] is true;
+
+        var head = ReadPlayerInt(player, "head") ?? -1;
+        var face = ReadPlayerInt(player, "face") ?? -1;
+        result["drawHead"] = ReadSetFlag(ArmorIDs.Head.Sets.DrawHead, head, true);
+        result["drawBeard"] = head < 0 || !ReadSetFlag(ArmorIDs.Head.Sets.PreventBeardDraw, head, false);
+        result["beardUsesHairColor"] = ReadSetFlag(
+            ArmorIDs.Beard.Sets.UseHairColor,
+            ReadPlayerInt(player, "beard") ?? -1,
+            false
+        );
+        result["faceUnderHair"] = ReadSetFlag(ArmorIDs.Face.Sets.DrawInFaceUnderHairLayer, face, false);
         return result;
     }
+
+    private static bool ReadSetFlag(bool[] flags, int index, bool defaultValue) =>
+        index >= 0 && index < flags.Length ? flags[index] : defaultValue;
 
     private static object?[] ReadPlayerItemSlots(Player player, string name)
     {
         if (ReadPlayerMember(player, name) is not IEnumerable items)
             return Array.Empty<object?>();
 
-        return items.Cast<object?>().Select(item => item == null ? null : new
+        return items.Cast<object?>().Select((item, slotIndex) => item == null ? null : new
         {
+            slotIndex,
             type = ReadPlayerInt(item, "type"),
+            netId = ReadPlayerInt(item, "netID"),
             stack = ReadPlayerInt(item, "stack"),
             prefix = ReadPlayerInt(item, "prefix"),
+            dye = ReadPlayerInt(item, "dye"),
             modName = (item as Item)?.ModItem?.Mod?.Name,
             modItemName = (item as Item)?.ModItem?.Name,
             headSlot = ReadPlayerInt(item, "headSlot"),
             bodySlot = ReadPlayerInt(item, "bodySlot"),
-            legSlot = ReadPlayerInt(item, "legSlot")
+            legSlot = ReadPlayerInt(item, "legSlot"),
+            faceSlot = ReadPlayerInt(item, "faceSlot"),
+            beardSlot = ReadPlayerInt(item, "beardSlot"),
+            backSlot = ReadPlayerInt(item, "backSlot"),
+            frontSlot = ReadPlayerInt(item, "frontSlot"),
+            shoeSlot = ReadPlayerInt(item, "shoeSlot"),
+            waistSlot = ReadPlayerInt(item, "waistSlot"),
+            neckSlot = ReadPlayerInt(item, "neckSlot"),
+            handOnSlot = ReadPlayerInt(item, "handOnSlot"),
+            handOffSlot = ReadPlayerInt(item, "handOffSlot"),
+            shieldSlot = ReadPlayerInt(item, "shieldSlot"),
+            wingSlot = ReadPlayerInt(item, "wingSlot")
         }).ToArray();
     }
 

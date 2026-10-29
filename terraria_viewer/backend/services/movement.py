@@ -22,9 +22,38 @@ from ..store_common import (
 class MovementMixin(StoreMixinContract):
     @staticmethod
     def _appearance_signature(appearance: Any) -> str:
+        """Hash visual fields and equipped slots while leaving telemetry fully persisted."""
         try:
+            appearance_data = as_json_object(appearance)
+            visual_fields = (
+                "head", "equippedHead", "body", "legs", "hair", "beard", "face",
+                "faceHead", "faceFlower", "skinVariant", "hairColor", "skinColor", "eyeColor",
+                "hairSettings", "modEquipTextures", "hideVisibleAccessory", "hideMisc",
+            )
+            render_data: dict[str, Any] = {
+                key: appearance_data[key]
+                for key in visual_fields
+                if key in appearance_data
+            }
+            for collection_name in ("armor", "dyes", "miscEquips", "miscDyes"):
+                slots = appearance_data.get(collection_name)
+                if not isinstance(slots, list):
+                    continue
+                render_data[collection_name] = [
+                    {
+                        key: slot.get(key)
+                        for key in (
+                            "slotIndex", "type", "netId", "prefix", "dye", "modName",
+                            "modItemName", "headSlot", "bodySlot", "legSlot", "faceSlot",
+                            "beardSlot", "backSlot", "frontSlot", "shoeSlot", "waistSlot",
+                            "neckSlot", "handOnSlot", "handOffSlot", "shieldSlot", "wingSlot",
+                        )
+                    }
+                    for slot in slots
+                    if isinstance(slot, dict) and int(slot.get("stack", 0) or 0) > 0
+                ]
             canonical = json.dumps(
-                {"renderer_version": AVATAR_RENDERER_VERSION, "appearance": appearance},
+                {"renderer_version": AVATAR_RENDERER_VERSION, "appearance": render_data},
                 sort_keys=True,
                 ensure_ascii=False,
                 separators=(",", ":"),

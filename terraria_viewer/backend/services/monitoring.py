@@ -86,13 +86,15 @@ class MonitoringMixin(StoreMixinContract):
                     if player.session_seconds is not None:
                         record["online_session_seconds"] = max(0, player.session_seconds)
                     appearance = player.appearance
-                    if isinstance(appearance, dict) and (
-                        appearance != record.get("appearance")
-                        or record.get("avatar_render_signature") != self._appearance_signature(appearance)
-                    ):
-                        record["appearance"] = appearance
-                        record["avatar_url"] = self._write_player_sprite(player_id, name, appearance)
-                        record["avatar_render_signature"] = self._appearance_signature(appearance)
+                    if isinstance(appearance, dict):
+                        # Keep every equipment slot current, but rebuild the image
+                        # only when a field that affects its pixels has changed.
+                        if appearance != record.get("appearance"):
+                            record["appearance"] = appearance
+                        render_signature = self._appearance_signature(appearance)
+                        if record.get("avatar_render_signature") != render_signature:
+                            record["avatar_url"] = self._write_player_sprite(player_id, name, appearance)
+                            record["avatar_render_signature"] = render_signature
                     elif (
                         not str(record.get("avatar_url", "")).endswith(".png")
                         and record.get("avatar_render_signature") != self._appearance_signature(record.get("appearance", {}))

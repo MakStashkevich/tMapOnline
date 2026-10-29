@@ -1,10 +1,5 @@
 import type { PlayerRecord } from '../core/viewer-types';
-import {
-  createOutlinedSprite,
-  defaultPlayerSprite,
-  loadSprite,
-  playerOutlineColor,
-} from '../core/sprite-renderer';
+import { loadSprite } from '../core/sprite-renderer';
 
 type PlayersPayload = {
   online?: { count?: number; ids?: string[] };
@@ -26,6 +21,7 @@ export async function mount(root: HTMLElement): Promise<void> {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = (await response.json()) as PlayersPayload;
   const online = new Set(data.online?.ids || []);
+  const avatarTargets: PlayerAvatarTarget[] = [];
   root.replaceChildren();
   const summary = document.createElement('div');
   summary.className = 'section-summary';
@@ -45,9 +41,18 @@ export async function mount(root: HTMLElement): Promise<void> {
     header.className = 'viewer-card-head';
     const avatar = document.createElement('span');
     avatar.className = 'player-card-avatar';
-    avatar.setAttribute('aria-hidden', 'true');
+    avatar.setAttribute('aria-label', `Портрет игрока ${player.name || 'Игрок'}`);
+    avatar.append(createPixelAvatarLoader());
     header.append(avatar);
-    void renderPlayerAvatar(avatar, player.avatar_url, online.has(player.id) ? player.team : null);
+    avatarTargets.push({
+      playerId: player.id,
+      container: avatar,
+      currentUrl: '',
+      shouldRefresh: online.has(player.id),
+    });
+    if (player.avatar_url) {
+      void renderPlayerAvatar(avatarTargets[avatarTargets.length - 1], player.avatar_url);
+    }
     const title = document.createElement('h3');
     title.textContent = player.name || 'Игрок';
     header.append(title);
@@ -89,17 +94,69 @@ export async function mount(root: HTMLElement): Promise<void> {
     list.append(empty);
   }
   root.append(list);
+  scheduleAvatarRefresh(avatarTargets);
 }
 
-async function renderPlayerAvatar(
-  container: HTMLElement,
-  avatarUrl: string | undefined,
-  team: number | null | undefined,
-): Promise<void> {
-  const source = (await loadSprite(avatarUrl || '')) || (await loadSprite(defaultPlayerSprite()));
-  if (!source || !container.isConnected) return;
-  const outlinedSprite = createOutlinedSprite(source, playerOutlineColor(team));
-  if (!outlinedSprite) return;
-  outlinedSprite.className = 'player-card-avatar-sprite';
-  container.replaceChildren(outlinedSprite);
+type PlayerAvatarTarget = {
+  playerId: string;
+  container: HTMLElement;
+  currentUrl: string;
+  shouldRefresh: boolean;
+};
+
+function createPixelAvatarLoader(): HTMLElement {
+  const loader = document.createElement('span');
+  loader.className = 'player-avatar-loader';
+  loader.setAttribute('aria-hidden', 'true');
+  for (let pixel = 0; pixel < 16; pixel += 1) {
+    loader.append(document.createElement('span'));
+  }
+  return loader;
+}
+
+async function renderPlayerAvatar(target: PlayerAvatarTarget, avatarUrl: string): Promise<boolean> {
+  const source = await loadSprite(avatarUrl);
+  if (!source || !target.container.isConnected) return false;
+
+  // Player cards use the raw head pixels; map-only team outlines do not belong in this menu.
+  const image = document.createElement('img');
+  image.className = 'player-card-avatar-sprite';
+  image.alt = '';
+  image.decoding = 'async';
+  image.src = source.src;
+  target.currentUrl = avatarUrl;
+  target.container.replaceChildren(image);
+  return true;
+}
+
+function scheduleAvatarRefresh(targets: PlayerAvatarTarget[]): void {
+  const activeTargets = targets.filter(
+    (target) => target.container.isConnected && (target.shouldRefresh || !target.currentUrl),
+  );
+  if (activeTargets.length === 0) return;
+
+  window.setTimeout(() => {
+    void refreshPlayerAvatars(activeTargets);
+  }, 2500);
+}
+
+async function refreshPlayerAvatars(targets: PlayerAvatarTarget[]): Promise<void> {
+  await Promise.all(
+    targets.map(async (target) => {
+      if (!target.container.isConnected) return;
+      try {
+        const query = new URLSearchParams({ id: target.playerId });
+        const response = await fetch(`/api/player-avatar?${query}`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { avatar_url?: string };
+        const avatarUrl = payload.avatar_url || '';
+        if (avatarUrl && avatarUrl !== target.currentUrl) {
+          await renderPlayerAvatar(target, avatarUrl);
+        }
+      } catch {
+        // Keep the pixel loader visible and retry while this player card remains on screen.
+      }
+    }),
+  );
+  scheduleAvatarRefresh(targets);
 }

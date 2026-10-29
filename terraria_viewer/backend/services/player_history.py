@@ -9,6 +9,7 @@ from ..store_common import (
     as_json_object,
     StoreMixinContract,
     HISTORY_RETENTION_SECONDS,
+    is_valid_png,
     Path,
     TERRARIA_CLIENT_IMAGES,
     is_valid_player_name,
@@ -80,17 +81,18 @@ class PlayerHistoryMixin(StoreMixinContract):
                     current_avatar = current_avatar_path.read_bytes()
                 except OSError:
                     current_avatar = b""
+                if current_avatar and not is_valid_png(current_avatar):
+                    current_avatar = b""
                 current_version = hashlib.sha256(current_avatar).hexdigest()[:8] if current_avatar else ""
                 expected_avatar_url = f"/player-avatars/{avatar_digest}.png?v={current_version}" if current_version else ""
-                appearance_signature = self._appearance_signature(record.get("appearance", {}))
+                appearance = record.get("appearance", {})
+                appearance_signature = self._appearance_signature(appearance)
                 needs_render = (
                     not current_avatar
                     or record.get("avatar_render_signature") != appearance_signature
                 )
                 if needs_render:
-                    rendered_url = self._write_player_sprite(
-                        player_id, str(record.get("name", "Player")), record.get("appearance", {})
-                    )
+                    rendered_url = self._write_player_sprite(player_id, str(record.get("name", "Player")), appearance)
                     record["avatar_url"] = rendered_url
                     record["avatar_render_signature"] = appearance_signature
                 else:
@@ -155,12 +157,16 @@ class PlayerHistoryMixin(StoreMixinContract):
     def _write_player_sprite(self, player_id: str, name: str, appearance: Any) -> str:
         """Render a pixel avatar from Terraria's own XNB sprite sheets, without a graphics device."""
         appearance = appearance if isinstance(appearance, dict) else {}
-        if not TERRARIA_CLIENT_IMAGES.is_dir():
+        if not self._has_renderable_player_appearance(appearance) or not TERRARIA_CLIENT_IMAGES.is_dir():
             return ""
 
         try:
             skin_variant = int(appearance.get("skinVariant", 0) or 0)
             hair = int(appearance.get("hair", -1) if appearance.get("hair") is not None else -1)
+            face = int(appearance.get("face", -1) if appearance.get("face") is not None else -1)
+            face_head = int(appearance.get("faceHead", -1) if appearance.get("faceHead") is not None else -1)
+            face_flower = int(appearance.get("faceFlower", -1) if appearance.get("faceFlower") is not None else -1)
+            beard = int(appearance.get("beard", -1) if appearance.get("beard") is not None else -1)
             # Visual priority is: transformation accessory texture (it replaces
             # the selected headgear in the renderer), visible vanity head, functional armor head, then the
             # player's unadorned face/hair. Player.head is the visible vanity
@@ -226,6 +232,10 @@ class PlayerHistoryMixin(StoreMixinContract):
                         skin_variant=skin_variant,
                         hair_id=hair,
                         head_id=head,
+                        face_id=face,
+                        face_head_id=face_head,
+                        face_flower_id=face_flower,
+                        beard_id=beard,
                         hair_color=valid_color("hairColor", "#49372F"),
                         skin_color=valid_color("skinColor", "#E6B38A"),
                         eye_color=valid_color("eyeColor", "#547B9D"),
@@ -234,6 +244,10 @@ class PlayerHistoryMixin(StoreMixinContract):
                         hide_hair=hair_flag("hideHair", False) if not wolf_mask else True,
                         back_hair_draw=hair_flag("backHairDraw", True) if not wolf_mask else False,
                         back_hair_without_headgear=hair_flag("backHairWithoutHeadgear", False),
+                        draw_face=hair_flag("drawHead", True),
+                        face_under_hair=hair_flag("faceUnderHair", False),
+                        draw_beard=hair_flag("drawBeard", True),
+                        beard_uses_hair_color=hair_flag("beardUsesHairColor", False),
                         mod_head_texture=Path(mod_head_texture) if mod_head_texture else None,
                         mod_face_texture=Path(mod_face_texture) if mod_face_texture else None,
                         mod_beard_texture=Path(mod_beard_texture) if mod_beard_texture else None,
@@ -245,3 +259,59 @@ class PlayerHistoryMixin(StoreMixinContract):
 
         version = hashlib.sha256(image_bytes).hexdigest()[:8]
         return f"/player-avatars/{digest}.png?v={version}"
+
+    @staticmethod
+    def _has_renderable_player_appearance(appearance: dict[str, Any]) -> bool:
+        """Do not invent a default face before Terraria has sent real appearance data."""
+        color_keys = ("hairColor", "skinColor", "eyeColor")
+        has_color = any(
+            isinstance(appearance.get(key), str)
+            and re.fullmatch(r"#[0-9a-fA-F]{6}", str(appearance[key])) is not None
+            for key in color_keys
+        )
+        has_saved_visual_parameter = any(
+            isinstance(appearance.get(key), int) and not isinstance(appearance.get(key), bool)
+            for key in ("hair", "head", "equippedHead", "skinVariant", "face", "faceHead", "beard")
+        )
+        return has_color or has_saved_visual_parameter
+
+    def player_avatar_url(self, player_id: str) -> str | None:
+        """Return a valid cached portrait or regenerate it from the saved appearance."""
+        with self._lock:
+            record = self._players.get(player_id)
+            if record is None:
+                return None
+            appearance = record.get("appearance", {})
+            appearance_signature = self._appearance_signature(appearance)
+            digest = hashlib.sha256(player_id.encode("utf-8")).hexdigest()[:32]
+            avatar_path = self._avatars_dir / f"{digest}.png"
+            try:
+                image_bytes = avatar_path.read_bytes()
+            except OSError:
+                image_bytes = b""
+            if (
+                is_valid_png(image_bytes)
+                and record.get("avatar_render_signature") == appearance_signature
+                and self._has_renderable_player_appearance(appearance if isinstance(appearance, dict) else {})
+            ):
+                version = hashlib.sha256(image_bytes).hexdigest()[:8]
+                avatar_url = f"/player-avatars/{digest}.png?v={version}"
+                record["avatar_url"] = avatar_url
+                return avatar_url
+            player_name = str(record.get("name", "Player"))
+
+        regenerated_url = self._write_player_sprite(player_id, player_name, appearance)
+        if not regenerated_url:
+            return ""
+
+        with self._lock:
+            current_record = self._players.get(player_id)
+            if current_record is None:
+                return None
+            if self._appearance_signature(current_record.get("appearance", {})) != appearance_signature:
+                # Appearance changed while the image was being rendered; let the next request build the new one.
+                return str(current_record.get("avatar_url") or "") or None
+            current_record["avatar_url"] = regenerated_url
+            current_record["avatar_render_signature"] = appearance_signature
+            self._save_players_locked()
+            return regenerated_url

@@ -86,6 +86,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(404, b"unknown section\n", "text/plain; charset=utf-8")
                 return
             self._send(200, body, "application/json; charset=utf-8", cache_control="no-store")
+        elif path == "/api/player-avatar":
+            player_id = parse_qs(request.query).get("id", [""])[0]
+            avatar_url = self.store.player_avatar_url(player_id)
+            if avatar_url is None:
+                self._send(404, b"player not found\n", "text/plain; charset=utf-8")
+                return
+            body = json.dumps({"avatar_url": avatar_url}, ensure_ascii=False).encode("utf-8")
+            self._send(200, body, "application/json; charset=utf-8", cache_control="no-store")
         elif path == "/api/player-map":
             player_id = parse_qs(request.query).get("id", [""])[0]
             player_map = self.store.player_map(player_id)
@@ -145,6 +153,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 body = (self.store.avatar_directory / filename).read_bytes()
             except OSError:
                 self._send(404, b"not found\n", "text/plain; charset=utf-8")
+                return
+            if filename.endswith(".png") and not is_valid_png(body):
+                self._send(404, b"invalid image\n", "text/plain; charset=utf-8")
                 return
             content_type = "image/png" if filename.endswith(".png") else "image/svg+xml; charset=utf-8"
             self._send(200, body, content_type, cache_control="public, max-age=31536000, immutable")
