@@ -28,6 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "map_tile_update_interval_ticks": 1,
         "world_scan_interval_ticks": 1,
         "browser_live_poll_interval_ms": 50,
+        "browser_overview_poll_interval_ms": 250,
         "browser_map_poll_interval_ms": 5000,
         "browser_debug_poll_interval_ms": 1000,
     },
@@ -102,11 +103,12 @@ def load_config(path: str | Path) -> dict[str, Any]:
             raise ValueError(f"telemetry.{key} must be a positive integer")
     for key in (
         "browser_live_poll_interval_ms",
+        "browser_overview_poll_interval_ms",
         "browser_map_poll_interval_ms",
         "browser_debug_poll_interval_ms",
     ):
         interval = config["telemetry"].get(key)
-        minimum = 50 if key == "browser_live_poll_interval_ms" else 100
+        minimum = 50 if key in ("browser_live_poll_interval_ms", "browser_overview_poll_interval_ms") else 100
         if type(interval) is not int or not minimum <= interval <= 30000:
             raise ValueError(
                 f"telemetry.{key} must be an integer from {minimum} to 30000"

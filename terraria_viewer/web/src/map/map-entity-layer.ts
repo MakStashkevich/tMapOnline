@@ -91,11 +91,47 @@ export class MapEntityLayer {
   private readonly playerMotions = new Map<string, MarkerMotion>();
   private readonly entityMotions = new Map<string, MarkerMotion>();
   private animationFrame: number | null = null;
+  private animationEnabled = true;
 
   constructor(private readonly root: HTMLElement) {}
 
   setWorld(world: MapEntityWorld): void {
     this.world = world;
+  }
+
+  refreshMarkerPositions(): void {
+    const now = performance.now();
+    for (const motion of this.playerMotions.values()) {
+      if (motion.element) {
+        const point = this.predictedPosition(motion, now);
+        this.positionMarker(motion.element, point.x, point.y);
+      }
+    }
+    for (const motion of this.entityMotions.values()) {
+      if (motion.element) {
+        const point = this.predictedPosition(motion, now);
+        this.positionMarker(motion.element, point.x, point.y);
+      }
+    }
+  }
+
+  setAnimationEnabled(enabled: boolean): void {
+    if (this.animationEnabled === enabled) return;
+    this.animationEnabled = enabled;
+
+    if (!enabled && this.animationFrame !== null) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+      for (const motion of this.playerMotions.values()) {
+        if (motion.element) this.positionMarker(motion.element, motion.x, motion.y);
+      }
+      for (const motion of this.entityMotions.values()) {
+        if (motion.element) this.positionMarker(motion.element, motion.x, motion.y);
+      }
+      return;
+    }
+
+    if (enabled) this.ensureAnimationFrame();
   }
 
   private layer(name: string): HTMLElement {
@@ -356,6 +392,12 @@ export class MapEntityLayer {
     motion.velocityX = velocityX;
     motion.velocityY = velocityY;
     motion.sampledAt = receivedAt;
+    if (!this.animationEnabled) {
+      motion.samples = [{ x, y, velocityX, velocityY, receivedAt }];
+      if (motion.element) this.positionMarker(motion.element, x, y);
+      return;
+    }
+
     if (snap) {
       motion.samples = [{ x, y, velocityX, velocityY, receivedAt }];
       if (motion.element) this.positionMarker(motion.element, x, y);
@@ -461,8 +503,15 @@ export class MapEntityLayer {
   }
 
   private positionMarker(marker: HTMLElement, x: number, y: number): void {
-    marker.style.left = `${(x / Number(this.world.width || 1)) * 100}%`;
-    marker.style.top = `${(y / Number(this.world.height || 1)) * 100}%`;
+    const width = Number(this.world.width || 1);
+    const height = Number(this.world.height || 1);
+    const pixelX = (x / width) * this.root.clientWidth;
+    const pixelY = (y / height) * this.root.clientHeight;
+
+    // Keep moving sprites on the compositor instead of triggering layout every animation frame.
+    marker.style.left = '0';
+    marker.style.top = '0';
+    marker.style.translate = `${pixelX}px ${pixelY}px`;
   }
 
   private updateMarkerDirection(
@@ -475,28 +524,33 @@ export class MapEntityLayer {
   }
 
   private ensureAnimationFrame(): void {
-    if (this.animationFrame !== null) return;
+    if (!this.animationEnabled || this.animationFrame !== null) return;
     this.animationFrame = requestAnimationFrame((now) => this.animateMarkers(now));
   }
 
   private animateMarkers(now: number): void {
     this.animationFrame = null;
+    if (!this.animationEnabled) return;
     let hasRecentMovement = false;
-    for (const motion of [...this.playerMotions.values(), ...this.entityMotions.values()]) {
-      if (!motion.element) continue;
-      const age = (now - motion.sampledAt) / 1000;
-      const point = this.predictedPosition(motion, now);
-      this.positionMarker(motion.element, point.x, point.y);
-      const hasBufferedSamples =
-        motion.samples.length > 1 &&
-        now - INTERPOLATION_DELAY_MS < motion.samples[motion.samples.length - 1].receivedAt;
-      if (
-        hasBufferedSamples ||
-        (age < MAX_EXTRAPOLATION_SECONDS && (motion.velocityX !== 0 || motion.velocityY !== 0))
-      ) {
-        hasRecentMovement = true;
+    const animate = (motions: Map<string, MarkerMotion>) => {
+      for (const motion of motions.values()) {
+        if (!motion.element) continue;
+        const age = (now - motion.sampledAt) / 1000;
+        const point = this.predictedPosition(motion, now);
+        this.positionMarker(motion.element, point.x, point.y);
+        const hasBufferedSamples =
+          motion.samples.length > 1 &&
+          now - INTERPOLATION_DELAY_MS < motion.samples[motion.samples.length - 1].receivedAt;
+        if (
+          hasBufferedSamples ||
+          (age < MAX_EXTRAPOLATION_SECONDS && (motion.velocityX !== 0 || motion.velocityY !== 0))
+        ) {
+          hasRecentMovement = true;
+        }
       }
-    }
+    };
+    animate(this.playerMotions);
+    animate(this.entityMotions);
     if (hasRecentMovement) this.ensureAnimationFrame();
   }
 

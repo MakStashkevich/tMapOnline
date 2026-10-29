@@ -56,6 +56,7 @@ const modules = await activateModules('world_map');
   ];
   const MASK_SCALE = 0.25;
   const OVERVIEW_SCALE = MASK_SCALE;
+  const ANIMATED_MARKER_ZOOM_THRESHOLD = 15;
   // Bump whenever overview composition or its pixel scale changes. IndexedDB
   // keeps this bitmap across reloads, so a stale preview can otherwise hide a
   // correct map assembled from the current chunks indefinitely.
@@ -274,10 +275,12 @@ const modules = await activateModules('world_map');
     if (!data) return;
     const worldPoint = anchorX == null ? null : worldPointAt(anchorX, anchorY);
     scale = Math.max(fitScale, Math.min(16, next));
+    mapEntityLayer.setAnimationEnabled(scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD);
     const width = Math.max(1, Math.round(data.world.width * scale)),
       height = Math.max(1, Math.round(data.world.height * scale));
     $('stage').style.width = `${width}px`;
     $('stage').style.height = `${height}px`;
+    mapEntityLayer.refreshMarkerPositions();
     const paths = $('paths');
     paths.setAttribute('viewBox', `0 0 ${data.world.width} ${data.world.height}`);
     paths.style.width = `${width}px`;
@@ -613,13 +616,16 @@ const modules = await activateModules('world_map');
   };
   const renderLiveLayers = () => {
     if (!data) return;
-    const players = playerPaths.withPaths(data.players || [], data.world);
+    const players = data.players || [];
     const routed = modules['world_map.routes']
-      ? players.filter((player) => playerOptions(player).route)
+      ? playerPaths.withPaths(
+          players.filter((player) => playerOptions(player).route),
+          data.world,
+        )
       : [];
     const nextRouteKey = JSON.stringify(routed.map((player) => [player.id, player.pathKey]));
     if (nextRouteKey !== routeKey) {
-      routeLayer.render(routed, data.players || []);
+      routeLayer.render(routed, players);
       routeKey = nextRouteKey;
     }
 
@@ -957,17 +963,37 @@ const modules = await activateModules('world_map');
           positions: [],
           has_imported_map: false,
         };
-        const positions = new Map<string, any>(
-          (current.positions || []).map((point) => [`${point.time}:${point.x}:${point.y}`, point]),
-        );
-        for (const point of incoming.positions || []) {
-          positions.set(`${point.time}:${point.x}:${point.y}`, point);
+        const positions: any[] = current.positions || [];
+        const incomingPositions: any[] = incoming.positions || [];
+        let appendOnly = true;
+        let latestPositionTime = Number(positions.at(-1)?.time) || 0;
+
+        for (const point of incomingPositions) {
+          const pointTime = Number(point.time) || 0;
+          if (pointTime <= latestPositionTime) appendOnly = false;
+          latestPositionTime = Math.max(latestPositionTime, pointTime);
           liveSince = Math.max(liveSince, Number(point.time) || 0);
         }
+
+        if (appendOnly) {
+          positions.push(...incomingPositions);
+        } else if (incomingPositions.length > 0) {
+          // Out-of-order samples are rare; keep the full dedupe path off the normal live-update path.
+          const mergedPositions = new Map<string, any>(
+            positions.map((point) => [`${point.time}:${point.x}:${point.y}`, point]),
+          );
+          for (const point of incomingPositions) {
+            mergedPositions.set(`${point.time}:${point.x}:${point.y}`, point);
+          }
+          current.positions = [...mergedPositions.values()].sort(
+            (left, right) => left.time - right.time,
+          );
+        }
+
         playersById.set(incoming.id, {
           ...current,
           ...incoming,
-          positions: [...positions.values()].sort((left, right) => left.time - right.time),
+          positions: current.positions || positions,
         });
       }
       const onlinePlayerIds = new Set(payload.online_player_ids || []);
@@ -1005,15 +1031,21 @@ const modules = await activateModules('world_map');
   function scheduleLiveRefresh() {
     clearTimeout(livePollTimer);
     if (!mapViewActive) return;
+    const closeUp = scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD;
+    const configuredInterval =
+      Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 50;
+    const overviewInterval =
+      Number(data?.telemetry?.configured_intervals?.browser_overview_poll_interval_ms) || 250;
+    const pollInterval = closeUp
+      ? configuredInterval
+      : Math.max(configuredInterval, overviewInterval);
+
     livePollTimer = setTimeout(
       async () => {
         await refreshLive();
         scheduleLiveRefresh();
       },
-      Math.max(
-        50,
-        Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 50,
-      ),
+      Math.max(50, pollInterval),
     );
   }
   if (debugMode) {
