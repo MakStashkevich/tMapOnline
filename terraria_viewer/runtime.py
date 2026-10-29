@@ -19,6 +19,11 @@ from .telemetry.stream import TelemetryStreamClient
 logger = logging.getLogger("terraria_viewer")
 STOP = threading.Event()
 
+SERVER_STARTUP_TIMEOUT_SECONDS = 180
+SERVER_LISTENER_LOSS_GRACE_SECONDS = 15
+SERVER_HEALTHY_RESET_SECONDS = 60
+SERVER_RESTART_BACKOFF_SECONDS = (5, 10, 20, 40, 60)
+
 
 def _path(value: str | Path) -> Path:
     return Path(value).expanduser().resolve()
@@ -67,6 +72,74 @@ def _read_tunnel_status(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _game_listener_is_open(port: int) -> bool:
+    """Check the listening socket without opening a game connection."""
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        logger.exception("Could not inspect the Terraria listening port %s.", port)
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _start_game_process(
+    config: dict[str, Any], cwd: Path, log_handle: Any
+) -> subprocess.Popen[bytes]:
+    command, _ = _server_command(config)
+    return subprocess.Popen(
+        command,
+        cwd=cwd,
+        stdin=subprocess.PIPE,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        env={
+            **os.environ,
+            "TERRARIA_TELEMETRY_INTERVAL_TICKS": str(
+                config["telemetry"]["snapshot_interval_ticks"]
+            ),
+            "TERRARIA_TELEMETRY_DEATH_RETENTION_SECONDS": str(
+                config["storage"]["death_retention_seconds"]
+            ),
+        },
+    )
+
+
+def _stop_game_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+
+    logger.info("Stopping tModLoader gracefully so it can save the world.")
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=90)
+        return
+    except subprocess.TimeoutExpired:
+        logger.error("tModLoader did not stop within 90 seconds; sending SIGTERM.")
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=15)
+    except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
+        logger.critical("tModLoader ignored SIGTERM; sending SIGKILL as a last resort.")
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            logger.exception("Could not fully stop the failed tModLoader process.")
+
+
 def run_local(config: dict[str, Any], *, run_game: bool) -> int:
     server_config = config["server"]
     game_config = config["terraria"]
@@ -89,46 +162,139 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
     game_process: subprocess.Popen[bytes] | None = None
     game_log_handle = None
     game_started = time.time() if run_game else None
+    launch_time = time.monotonic()
+    listener_missing_since: float | None = None
+    listener_healthy_since: float | None = None
+    listener_was_ready = False
+    restart_attempt = 0
+    game_cwd = _path(game_config["game_dir"])
     try:
         if run_game:
-            command, cwd = _server_command(config)
+            _server_command(config)
             log_path = _path(config["terraria"]["game_dir"]) / "tModLoader-Logs" / "server.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_follower = ServerLogFollower(log_path)
             game_log_handle = log_path.open("a", encoding="utf-8", buffering=1)
-            started_process = subprocess.Popen(
-                command,
-                cwd=cwd,
-                stdin=subprocess.PIPE,
-                stdout=game_log_handle,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                env={
-                    **os.environ,
-                    "TERRARIA_TELEMETRY_INTERVAL_TICKS": str(
-                        config["telemetry"]["snapshot_interval_ticks"]
-                    ),
-                    "TERRARIA_TELEMETRY_DEATH_RETENTION_SECONDS": str(
-                        config["storage"]["death_retention_seconds"]
-                    ),
-                },
-            )
-            game_process = started_process
-            logger.info("Started local tModLoader process %s; SSH tunnel is not managed here.", started_process.pid)
+            try:
+                game_process = _start_game_process(config, game_cwd, game_log_handle)
+            except OSError as error:
+                store.record_error("tModLoader", f"Initial server launch failed: {error}")
+                logger.exception("Initial tModLoader launch failed; automatic retry is enabled.")
+            else:
+                logger.info(
+                    "Started local tModLoader process %s; waiting for TCP port %s. SSH tunnel is not managed here.",
+                    game_process.pid,
+                    game_config["game_port"],
+                )
         else:
             log_follower = None
 
         tunnel_status_path = _path(config.get("tunnel_status_file", "~/Library/Application Support/TerrariaTunnel/tunnel-status.json"))
         while not STOP.is_set():
             now = time.time()
+            monotonic_now = time.monotonic()
+            listener_up = _game_listener_is_open(game_config["game_port"])
+
             if run_game and game_process is not None:
-                alive = game_process.poll() is None
-                store.update(game_running=alive, listener_up=alive, tunnel_ready=False, game_started_at=game_started)
                 if log_follower is not None:
                     log_follower.read_new_errors(store)
-                if not alive:
-                    store.record_error("tModLoader", f"Server process exited with code {game_process.returncode}.")
-                    return game_process.returncode or 1
+
+                process_alive = game_process.poll() is None
+                if listener_up:
+                    listener_missing_since = None
+                    if listener_healthy_since is None:
+                        listener_healthy_since = monotonic_now
+                    if not listener_was_ready:
+                        logger.info("Terraria game port %s is listening.", game_config["game_port"])
+                    listener_was_ready = True
+                    if monotonic_now - listener_healthy_since >= SERVER_HEALTHY_RESET_SECONDS:
+                        restart_attempt = 0
+                else:
+                    listener_healthy_since = None
+                    if listener_missing_since is None:
+                        listener_missing_since = monotonic_now
+
+                startup_expired = (
+                    not listener_was_ready
+                    and monotonic_now - launch_time >= SERVER_STARTUP_TIMEOUT_SECONDS
+                )
+                listener_lost = (
+                    listener_was_ready
+                    and listener_missing_since is not None
+                    and monotonic_now - listener_missing_since
+                    >= SERVER_LISTENER_LOSS_GRACE_SECONDS
+                )
+
+                if not process_alive or startup_expired or listener_lost:
+                    if not process_alive:
+                        reason = f"process exited with code {game_process.returncode}"
+                    elif startup_expired:
+                        reason = (
+                            f"TCP port {game_config['game_port']} did not start listening "
+                            f"within {SERVER_STARTUP_TIMEOUT_SECONDS} seconds"
+                        )
+                    else:
+                        reason = (
+                            f"TCP port {game_config['game_port']} stopped listening for "
+                            f"{SERVER_LISTENER_LOSS_GRACE_SECONDS} seconds"
+                        )
+
+                    logger.error("tModLoader is unhealthy: %s. Restarting it.", reason)
+                    store.record_error("tModLoader", f"{reason}; automatic restart scheduled.")
+                    _stop_game_process(game_process)
+
+                    if STOP.is_set():
+                        break
+
+                    backoff_index = min(restart_attempt, len(SERVER_RESTART_BACKOFF_SECONDS) - 1)
+                    delay = SERVER_RESTART_BACKOFF_SECONDS[backoff_index]
+                    restart_attempt += 1
+                    logger.warning("Retrying tModLoader in %s seconds (attempt %s).", delay, restart_attempt)
+                    if STOP.wait(delay):
+                        break
+
+                    try:
+                        game_process = _start_game_process(config, game_cwd, game_log_handle)
+                    except OSError as error:
+                        game_process = None
+                        store.record_error("tModLoader", f"Automatic restart failed: {error}")
+                        logger.exception("Could not start tModLoader; it will be retried.")
+                        launch_time = time.monotonic() - SERVER_STARTUP_TIMEOUT_SECONDS
+                    else:
+                        launch_time = time.monotonic()
+                        logger.info("Restarted local tModLoader process %s.", game_process.pid)
+                    listener_missing_since = None
+                    listener_healthy_since = None
+                    listener_was_ready = False
+                    continue
+
+                store.update(
+                    game_running=process_alive,
+                    listener_up=listener_up,
+                    tunnel_ready=False,
+                    game_started_at=game_started,
+                )
+
+            elif run_game and game_process is None:
+                backoff_index = min(restart_attempt, len(SERVER_RESTART_BACKOFF_SECONDS) - 1)
+                delay = SERVER_RESTART_BACKOFF_SECONDS[backoff_index]
+                restart_attempt += 1
+                logger.warning("Retrying unavailable tModLoader launch in %s seconds.", delay)
+                if STOP.wait(delay):
+                    break
+                try:
+                    game_process = _start_game_process(config, game_cwd, game_log_handle)
+                except OSError as error:
+                    store.record_error("tModLoader", f"Automatic restart failed: {error}")
+                    logger.exception("Could not start tModLoader; it will be retried.")
+                else:
+                    launch_time = time.monotonic()
+                    listener_missing_since = None
+                    listener_healthy_since = None
+                    listener_was_ready = False
+                    logger.info("Restarted local tModLoader process %s.", game_process.pid)
+                continue
+
             tunnel_status = _read_tunnel_status(tunnel_status_path)
             tunnel_updated = float(tunnel_status.get("updated_at", 0) or 0)
             tunnel_fresh = now - tunnel_updated < 30
@@ -136,7 +302,7 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
             store.update(
                 tunnel_ready=tunnel_ready,
                 game_running=game_process is not None and game_process.poll() is None,
-                listener_up=game_process is not None and game_process.poll() is None,
+                listener_up=listener_up,
                 game_started_at=game_started,
                 tunnel_reconnecting=tunnel_fresh and tunnel_status.get("reconnecting") is True,
                 network_interface=tunnel_status.get("interface"),
@@ -147,20 +313,7 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
         return 0
     finally:
         if game_process is not None and game_process.poll() is None:
-            logger.info("Stopping tModLoader gracefully to save the world.")
-            try:
-                os.killpg(game_process.pid, signal.SIGINT)
-            except ProcessLookupError:
-                pass
-            try:
-                game_process.wait(timeout=180)
-            except subprocess.TimeoutExpired:
-                logger.error("tModLoader did not stop within 180 seconds; sending SIGTERM.")
-                try:
-                    os.killpg(game_process.pid, signal.SIGTERM)
-                    game_process.wait(timeout=15)
-                except (ProcessLookupError, subprocess.TimeoutExpired):
-                    pass
+            _stop_game_process(game_process)
         telemetry.stop()
         if game_log_handle is not None:
             game_log_handle.close()
