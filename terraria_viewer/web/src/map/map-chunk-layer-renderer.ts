@@ -19,39 +19,49 @@ type ChunkLayerOptions = {
   maskScale: number;
 };
 
+const CHUNK_RENDER_DEBOUNCE_MS = 60;
+const CHUNK_RENDER_BATCH_SIZE = 8;
+const CHUNK_DETAIL_SCALE_MIN = 0.75;
+const CHUNK_DETAIL_FIT_MULTIPLIER = 8;
+
 /** Owns the visible map canvases and their delayed rendering lifecycle. */
 export class MapChunkLayerRenderer {
   private readonly canvases = new Map<string, HTMLCanvasElement>();
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
   private renderRunning = false;
   private renderPending = false;
+  private renderVersion = 0;
+  private completedRenderVersion = 0;
   private lastRenderDurationMs = 0;
   private lastRenderChunkCount = 0;
 
   constructor(private readonly options: ChunkLayerOptions) {}
 
   layout(): void {
-    const { getScale, getChunkSize } = this.options;
-    const scale = getScale();
-    const chunkSize = getChunkSize();
+    const { getScale, getWorld } = this.options;
+    const world = getWorld();
+    if (!world) return;
 
-    for (const [key, canvas] of this.canvases) {
-      const [chunkX, chunkY] = this.parseKey(key);
-      canvas.style.left = `${chunkX * chunkSize * scale}px`;
-      canvas.style.top = `${chunkY * chunkSize * scale}px`;
-      canvas.style.width = `${chunkSize * scale}px`;
-      canvas.style.height = `${chunkSize * scale}px`;
-    }
+    const scale = getScale();
+    this.options.layer.style.width = `${world.width}px`;
+    this.options.layer.style.height = `${world.height}px`;
+    this.options.layer.style.transformOrigin = 'top left';
+    this.options.layer.style.transform = `scale(${scale})`;
   }
 
   requestRender(): void {
     if (this.renderTimer) clearTimeout(this.renderTimer);
+    const requestedVersion = ++this.renderVersion;
     this.renderTimer = setTimeout(() => {
-      void this.renderLatestViewport();
-    }, 45);
+      void this.renderLatestViewport(requestedVersion);
+    }, CHUNK_RENDER_DEBOUNCE_MS);
   }
 
   clear(): void {
+    this.renderVersion++;
+    this.renderPending = false;
+    if (this.renderTimer) clearTimeout(this.renderTimer);
+    this.renderTimer = null;
     for (const canvas of this.canvases.values()) canvas.remove();
     this.canvases.clear();
     this.options.codec.clear();
@@ -83,8 +93,10 @@ export class MapChunkLayerRenderer {
     for (const canvas of this.canvases.values()) canvas.dataset.maskVersion = '';
   }
 
-  private async renderLatestViewport(): Promise<void> {
+  private async renderLatestViewport(requestedVersion: number): Promise<void> {
     this.renderTimer = null;
+    if (requestedVersion !== this.renderVersion) return;
+    if (requestedVersion <= this.completedRenderVersion) return;
     if (this.renderRunning) {
       this.renderPending = true;
       return;
@@ -93,25 +105,31 @@ export class MapChunkLayerRenderer {
     this.renderRunning = true;
     do {
       this.renderPending = false;
+      const version = this.renderVersion;
       const startedAt = performance.now();
       try {
-        await this.renderVisibleChunks();
+        await this.renderVisibleChunks(version);
       } catch (error) {
         this.options.onError(error);
       } finally {
         this.lastRenderDurationMs = performance.now() - startedAt;
       }
+      if (version === this.renderVersion) this.completedRenderVersion = version;
     } while (this.renderPending);
     this.renderRunning = false;
   }
 
-  private async renderVisibleChunks(): Promise<void> {
+  private async renderVisibleChunks(version: number): Promise<void> {
     const world = this.options.getWorld();
     const maskCanvas = this.options.getMaskCanvas();
     if (!world || !maskCanvas) return;
 
     const scale = this.options.getScale();
-    if (scale < this.options.getFitScale() * 4) {
+    const detailThreshold = Math.max(
+      CHUNK_DETAIL_SCALE_MIN,
+      this.options.getFitScale() * CHUNK_DETAIL_FIT_MULTIPLIER,
+    );
+    if (scale < detailThreshold) {
       this.removeAllCanvases();
       this.lastRenderChunkCount = 0;
       return;
@@ -156,20 +174,42 @@ export class MapChunkLayerRenderer {
       }
     }
 
-    await Promise.all(
-      [...visible].map(([key, source]) =>
-        this.renderChunk(key, source, maskCanvas, scale, chunkSize),
-      ),
-    );
+    const centerX = (left + right) / 2;
+    const centerY = (top + bottom) / 2;
+    const prioritized = [...visible].sort(([leftKey], [rightKey]) => {
+      const [leftX, leftY] = this.parseKey(leftKey);
+      const [rightX, rightY] = this.parseKey(rightKey);
+      const leftDistance = Math.hypot(
+        (leftX + 0.5) * chunkSize - centerX,
+        (leftY + 0.5) * chunkSize - centerY,
+      );
+      const rightDistance = Math.hypot(
+        (rightX + 0.5) * chunkSize - centerX,
+        (rightY + 0.5) * chunkSize - centerY,
+      );
+      return leftDistance - rightDistance;
+    });
+
+    for (let start = 0; start < prioritized.length; start += CHUNK_RENDER_BATCH_SIZE) {
+      if (version !== this.renderVersion) return;
+
+      const batch = prioritized.slice(start, start + CHUNK_RENDER_BATCH_SIZE);
+      await Promise.all(
+        batch.map(([key, source]) => this.renderChunk(key, source, maskCanvas, chunkSize, version)),
+      );
+
+      if (start + CHUNK_RENDER_BATCH_SIZE < prioritized.length) await this.nextFrame();
+    }
   }
 
   private async renderChunk(
     key: string,
     source: MapChunkSource,
     maskCanvas: HTMLCanvasElement,
-    scale: number,
     chunkSize: number,
+    version: number,
   ): Promise<void> {
+    if (version !== this.renderVersion) return;
     const encodedSource = JSON.stringify([source.base, source.overlays]);
     const previous = this.canvases.get(key);
     const replace = !previous || previous.dataset.encoded !== encodedSource;
@@ -187,6 +227,7 @@ export class MapChunkLayerRenderer {
     const maskToken = fullMapEnabled ? 'full-map' : `explored-${this.options.getMaskVersion()}`;
     if (canvas.dataset.maskVersion !== maskToken) {
       const pixels = await this.options.codec.compose(source, chunkSize);
+      if (version !== this.renderVersion) return;
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Could not create a map chunk canvas context.');
 
@@ -200,11 +241,12 @@ export class MapChunkLayerRenderer {
     }
 
     const [chunkX, chunkY] = this.parseKey(key);
-    canvas.style.left = `${chunkX * chunkSize * scale}px`;
-    canvas.style.top = `${chunkY * chunkSize * scale}px`;
-    canvas.style.width = `${chunkSize * scale}px`;
-    canvas.style.height = `${chunkSize * scale}px`;
+    canvas.style.left = `${chunkX * chunkSize}px`;
+    canvas.style.top = `${chunkY * chunkSize}px`;
+    canvas.style.width = `${chunkSize}px`;
+    canvas.style.height = `${chunkSize}px`;
     if (replace) {
+      if (version !== this.renderVersion) return;
       this.options.layer.append(canvas);
       this.canvases.set(key, canvas);
       previous?.remove();
@@ -243,5 +285,9 @@ export class MapChunkLayerRenderer {
   private parseKey(key: string): [number, number] {
     const [chunkX, chunkY] = key.split(',').map(Number);
     return [chunkX, chunkY];
+  }
+
+  private nextFrame(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
 }
