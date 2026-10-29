@@ -73,6 +73,14 @@ const modules = await activateModules('world_map');
     liveRequestActive = false,
     liveSince = 0,
     mapRevision = 0;
+  let liveEventSource: EventSource | null = null;
+  let liveStreamConnected = false;
+  let liveStreamIntervalMs = 0;
+  let liveApplyQueue: Promise<void> = Promise.resolve();
+  let lastLiveArrivalAt = 0;
+  let lastNetworkPingAt = 0;
+  const networkRttSamples: number[] = [];
+  const liveArrivalSamples: number[] = [];
   let mapViewActive = true;
   let fullMapEnabled = false;
   let debugWindowEnabled = false;
@@ -275,6 +283,7 @@ const modules = await activateModules('world_map');
     const worldPoint = anchorX == null ? null : worldPointAt(anchorX, anchorY);
     scale = Math.max(fitScale, Math.min(16, next));
     mapEntityLayer.setAnimationEnabled(scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD);
+    updateLiveStreamCadence();
     const width = Math.max(1, Math.round(data.world.width * scale)),
       height = Math.max(1, Math.round(data.world.height * scale));
     $('stage').style.width = `${width}px`;
@@ -935,6 +944,7 @@ const modules = await activateModules('world_map');
       if (requestedWorld) params.set('world', requestedWorld);
       if (liveSince > 0) params.set('since', String(liveSince));
       params.set('map_since', String(mapRevision));
+      const requestStartedAt = performance.now();
       const response = await fetchWithTimeout(
         `/api/world-map/live${params.size ? `?${params}` : ''}`,
         { cache: 'no-store' },
@@ -943,93 +953,221 @@ const modules = await activateModules('world_map');
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const responseText = await response.text();
       const payload = JSON.parse(responseText);
-      if (!data || String(data.world?.id) !== String(payload.world?.id)) return;
-      if (payload.map_delta_reset) {
-        await refresh(false);
-        mapRevision = Number(data?.map_revision) || 0;
-        return;
-      }
-      applyMapTileUpdates(payload.map_tile_updates || []);
-      mapRevision = Number(payload.map_revision) || mapRevision;
-      data.map_revision = mapRevision;
-
-      const playersById = new Map<string, any>(
-        (data.players || []).map((player) => [player.id, player]),
-      );
-      for (const incoming of payload.players || []) {
-        const current = playersById.get(incoming.id) || {
-          chunks: [],
-          positions: [],
-          has_imported_map: false,
-        };
-        const positions: any[] = current.positions || [];
-        const incomingPositions: any[] = incoming.positions || [];
-        let appendOnly = true;
-        let latestPositionTime = Number(positions.at(-1)?.time) || 0;
-
-        for (const point of incomingPositions) {
-          const pointTime = Number(point.time) || 0;
-          if (pointTime <= latestPositionTime) appendOnly = false;
-          latestPositionTime = Math.max(latestPositionTime, pointTime);
-          liveSince = Math.max(liveSince, Number(point.time) || 0);
-        }
-
-        if (appendOnly) {
-          positions.push(...incomingPositions);
-        } else if (incomingPositions.length > 0) {
-          // Out-of-order samples are rare; keep the full dedupe path off the normal live-update path.
-          const mergedPositions = new Map<string, any>(
-            positions.map((point) => [`${point.time}:${point.x}:${point.y}`, point]),
-          );
-          for (const point of incomingPositions) {
-            mergedPositions.set(`${point.time}:${point.x}:${point.y}`, point);
-          }
-          current.positions = [...mergedPositions.values()].sort(
-            (left, right) => left.time - right.time,
-          );
-        }
-
-        playersById.set(incoming.id, {
-          ...current,
-          ...incoming,
-          positions: current.positions || positions,
-        });
-      }
-      const onlinePlayerIds = new Set(payload.online_player_ids || []);
-      data.players = [...playersById.values()].map((player) => ({
-        ...player,
-        online: onlinePlayerIds.has(player.id),
-        team: onlinePlayerIds.has(player.id) ? player.team : null,
-        direction: onlinePlayerIds.has(player.id) ? player.direction : null,
-        session_seconds: onlinePlayerIds.has(player.id) ? player.session_seconds : null,
-      }));
-      const deathsById = new Map<string, any>(
-        (data.deaths || []).map((death) => [death.id, death]),
-      );
-      for (const death of payload.deaths || []) {
-        deathsById.set(death.id, death);
-        liveSince = Math.max(liveSince, Number(death.timestamp) || 0);
-      }
-      data.deaths = [...deathsById.values()];
-      data.active_npcs = payload.active_npcs || [];
-      data.coins = payload.coins || [];
-      data.telemetry = payload.telemetry;
-      data.live_payload_bytes = new Blob([responseText]).size;
-      data.live_updated_at = payload.updated_at;
-      renderDebugPanel?.setData(data);
-      const renderStartedAt = performance.now();
-      renderLiveLayers();
-      data.live_render_ms = performance.now() - renderStartedAt;
-      renderScanStatus();
+      recordNetworkArrival(performance.now(), false);
+      await applyLivePayload(payload, responseText, performance.now() - requestStartedAt);
+      void measureNetworkRtt();
     } catch (error) {
       console.warn('Live map update failed:', error);
     } finally {
       liveRequestActive = false;
     }
   }
+  function recordNetworkArrival(now: number, fromStream: boolean): void {
+    if (lastLiveArrivalAt > 0) {
+      const interval = now - lastLiveArrivalAt;
+      if (interval > 0 && interval < 10000) {
+        liveArrivalSamples.push(interval);
+        if (liveArrivalSamples.length > 120) liveArrivalSamples.shift();
+        const sorted = [...liveArrivalSamples].sort((left, right) => left - right);
+        const median = percentile(sorted, 0.5);
+        const p95 = percentile(sorted, 0.95);
+        // Keep the normal delay at 80 ms and add only the measured tail jitter.
+        mapEntityLayer.setInterpolationDelay(
+          Math.max(80, Math.min(300, 80 + Math.max(0, p95 - median) * 1.5)),
+        );
+      }
+    }
+    lastLiveArrivalAt = now;
+    if (data) {
+      const sorted = [...liveArrivalSamples].sort((left, right) => left - right);
+      const median = percentile(sorted, 0.5);
+      const p95 = percentile(sorted, 0.95);
+      data.live_network = {
+        ...(data.live_network || {}),
+        stream_state: liveStreamConnected ? 'Подключён' : 'Резервный опрос',
+        arrival_p50_ms: median,
+        arrival_p95_ms: p95,
+        interpolation_delay_ms: Math.max(80, Math.min(300, 80 + Math.max(0, p95 - median) * 1.5)),
+      };
+      if (fromStream) data.live_network.stream_state = 'SSE';
+    }
+  }
+  function percentile(sortedSamples: number[], fraction: number): number {
+    if (sortedSamples.length === 0) return 0;
+    return sortedSamples[
+      Math.min(sortedSamples.length - 1, Math.floor((sortedSamples.length - 1) * fraction))
+    ];
+  }
+  async function measureNetworkRtt(): Promise<void> {
+    if (!mapViewActive || (lastNetworkPingAt > 0 && performance.now() - lastNetworkPingAt < 15000))
+      return;
+    lastNetworkPingAt = performance.now();
+    const startedAt = performance.now();
+    try {
+      const response = await fetch('/api/ping', { cache: 'no-store' });
+      if (!response.ok) return;
+      networkRttSamples.push(performance.now() - startedAt);
+      if (networkRttSamples.length > 20) networkRttSamples.shift();
+      if (data) {
+        const sorted = [...networkRttSamples].sort((a, b) => a - b);
+        data.live_network = {
+          ...(data.live_network || {}),
+          rtt_p50_ms: percentile(sorted, 0.5),
+          rtt_p95_ms: percentile(sorted, 0.95),
+        };
+      }
+    } catch {
+      // A diagnostic ping must never interrupt the live map stream.
+    }
+  }
+  async function applyLivePayload(
+    payload: any,
+    responseText: string,
+    requestMs: number | null,
+  ): Promise<void> {
+    if (!data || String(data.world?.id) !== String(payload.world?.id)) return;
+    if (payload.map_delta_reset) {
+      await refresh(false);
+      mapRevision = Number(data?.map_revision) || 0;
+      return;
+    }
+    applyMapTileUpdates(payload.map_tile_updates || []);
+    mapRevision = Number(payload.map_revision) || mapRevision;
+    data.map_revision = mapRevision;
+
+    const playersById = new Map<string, any>(
+      (data.players || []).map((player) => [player.id, player]),
+    );
+    for (const incoming of payload.players || []) {
+      const current = playersById.get(incoming.id) || {
+        chunks: [],
+        positions: [],
+        has_imported_map: false,
+      };
+      const positions: any[] = current.positions || [];
+      const incomingPositions: any[] = incoming.positions || [];
+      let appendOnly = true;
+      let latestPositionTime = Number(positions.at(-1)?.time) || 0;
+
+      for (const point of incomingPositions) {
+        const pointTime = Number(point.time) || 0;
+        if (pointTime <= latestPositionTime) appendOnly = false;
+        latestPositionTime = Math.max(latestPositionTime, pointTime);
+        liveSince = Math.max(liveSince, Number(point.time) || 0);
+      }
+
+      if (appendOnly) {
+        positions.push(...incomingPositions);
+      } else if (incomingPositions.length > 0) {
+        // Out-of-order samples are rare; keep the full dedupe path off the normal live-update path.
+        const mergedPositions = new Map<string, any>(
+          positions.map((point) => [`${point.time}:${point.x}:${point.y}`, point]),
+        );
+        for (const point of incomingPositions) {
+          mergedPositions.set(`${point.time}:${point.x}:${point.y}`, point);
+        }
+        current.positions = [...mergedPositions.values()].sort(
+          (left, right) => left.time - right.time,
+        );
+      }
+
+      playersById.set(incoming.id, {
+        ...current,
+        ...incoming,
+        positions: current.positions || positions,
+      });
+    }
+    const onlinePlayerIds = new Set(payload.online_player_ids || []);
+    data.players = [...playersById.values()].map((player) => ({
+      ...player,
+      online: onlinePlayerIds.has(player.id),
+      team: onlinePlayerIds.has(player.id) ? player.team : null,
+      direction: onlinePlayerIds.has(player.id) ? player.direction : null,
+      session_seconds: onlinePlayerIds.has(player.id) ? player.session_seconds : null,
+    }));
+    const deathsById = new Map<string, any>((data.deaths || []).map((death) => [death.id, death]));
+    for (const death of payload.deaths || []) {
+      deathsById.set(death.id, death);
+      liveSince = Math.max(liveSince, Number(death.timestamp) || 0);
+    }
+    data.deaths = [...deathsById.values()];
+    data.active_npcs = payload.active_npcs || [];
+    data.coins = payload.coins || [];
+    data.telemetry = payload.telemetry;
+    data.live_payload_bytes = new Blob([responseText]).size;
+    data.live_request_ms = requestMs;
+    data.live_updated_at = payload.updated_at;
+    renderDebugPanel?.setData(data);
+    const renderStartedAt = performance.now();
+    renderLiveLayers();
+    data.live_render_ms = performance.now() - renderStartedAt;
+    renderScanStatus();
+  }
+  function connectLiveStream(): void {
+    if (!mapViewActive || liveEventSource) return;
+    const params = new URLSearchParams();
+    const requestedWorld = new URLSearchParams(location.search).get('world');
+    if (requestedWorld) params.set('world', requestedWorld);
+    if (liveSince > 0) params.set('since', String(liveSince));
+    params.set('map_since', String(mapRevision));
+    const closeUp = scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD;
+    const configuredInterval =
+      Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 50;
+    const overviewInterval =
+      Number(data?.telemetry?.configured_intervals?.browser_overview_poll_interval_ms) || 250;
+    liveStreamIntervalMs = closeUp
+      ? configuredInterval
+      : Math.max(configuredInterval, overviewInterval);
+    params.set('interval_ms', String(liveStreamIntervalMs));
+    const stream = new EventSource(`/api/world-map/stream?${params}`);
+    liveEventSource = stream;
+    stream.onopen = () => {
+      liveStreamConnected = true;
+      clearTimeout(livePollTimer);
+      void measureNetworkRtt();
+    };
+    stream.onmessage = (event) => {
+      const arrivalAt = performance.now();
+      try {
+        const payload = JSON.parse(event.data);
+        const responseText = event.data as string;
+        recordNetworkArrival(arrivalAt, true);
+        data && (data.live_network.stream_state = 'SSE');
+        liveApplyQueue = liveApplyQueue
+          .then(() => applyLivePayload(payload, responseText, null))
+          .catch((error) => console.warn('Live map event update failed:', error));
+        void measureNetworkRtt();
+      } catch (error) {
+        console.warn('Invalid live map event:', error);
+      }
+    };
+    stream.onerror = () => {
+      liveStreamConnected = false;
+      if (data) {
+        data.live_network = { ...(data.live_network || {}), stream_state: 'Переподключение' };
+      }
+      scheduleLiveRefresh();
+    };
+  }
+  function updateLiveStreamCadence(): void {
+    const closeUp = scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD;
+    const configuredInterval =
+      Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 50;
+    const overviewInterval =
+      Number(data?.telemetry?.configured_intervals?.browser_overview_poll_interval_ms) || 250;
+    const desiredInterval = closeUp
+      ? configuredInterval
+      : Math.max(configuredInterval, overviewInterval);
+    if (liveEventSource && desiredInterval !== liveStreamIntervalMs) {
+      liveEventSource.close();
+      liveEventSource = null;
+      liveStreamConnected = false;
+    }
+    connectLiveStream();
+  }
   function scheduleLiveRefresh() {
     clearTimeout(livePollTimer);
-    if (!mapViewActive) return;
+    if (!mapViewActive || liveStreamConnected) return;
     const closeUp = scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD;
     const configuredInterval =
       Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 50;
@@ -1042,6 +1180,7 @@ const modules = await activateModules('world_map');
     livePollTimer = setTimeout(
       async () => {
         await refreshLive();
+        if (liveStreamConnected) return;
         scheduleLiveRefresh();
       },
       Math.max(50, pollInterval),
@@ -1238,6 +1377,7 @@ const modules = await activateModules('world_map');
       .then(() => refresh(true))
       .then(() => refreshLive())
       .then(() => {
+        connectLiveStream();
         scheduleRefresh();
         scheduleLiveRefresh();
       });
@@ -1246,6 +1386,7 @@ const modules = await activateModules('world_map');
       refresh(true)
         .then(() => refreshLive())
         .then(() => {
+          connectLiveStream();
           scheduleRefresh();
           scheduleLiveRefresh();
         }),
@@ -1255,7 +1396,13 @@ const modules = await activateModules('world_map');
     mapViewActive = (event as CustomEvent<{ view?: string }>).detail?.view === 'map';
     clearTimeout(pollTimer);
     clearTimeout(livePollTimer);
+    if (!mapViewActive) {
+      liveEventSource?.close();
+      liveEventSource = null;
+      liveStreamConnected = false;
+    }
     if (mapViewActive) {
+      connectLiveStream();
       refresh(false)
         .then(() => refreshLive())
         .finally(() => {

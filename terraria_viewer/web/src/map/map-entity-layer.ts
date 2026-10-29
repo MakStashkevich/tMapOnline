@@ -76,12 +76,13 @@ type MotionSample = {
 
 const TERRARIA_TICKS_PER_SECOND = 60;
 const TERRARIA_PIXELS_PER_TILE = 16;
-const INTERPOLATION_DELAY_MS = 80;
+const DEFAULT_INTERPOLATION_DELAY_MS = 80;
 const MAX_EXTRAPOLATION_SECONDS = 0.12;
-const MAX_MOTION_SAMPLES = 8;
+const MAX_MOTION_SAMPLES = 24;
 
 /** Renders map objects as DOM layers while keeping their sprite and fallback rules together. */
 export class MapEntityLayer {
+  private interpolationDelayMs = DEFAULT_INTERPOLATION_DELAY_MS;
   private world: MapEntityWorld = {};
   private spawnRenderKey = '';
   private coinRenderVersion = 0;
@@ -97,6 +98,10 @@ export class MapEntityLayer {
 
   setWorld(world: MapEntityWorld): void {
     this.world = world;
+  }
+
+  setInterpolationDelay(delayMs: number): void {
+    this.interpolationDelayMs = Math.max(80, Math.min(300, delayMs));
   }
 
   refreshMarkerPositions(): void {
@@ -423,14 +428,14 @@ export class MapEntityLayer {
   }
 
   private predictedPosition(motion: MarkerMotion, now: number): { x: number; y: number } {
-    const renderTime = now - INTERPOLATION_DELAY_MS;
+    const renderTime = now - this.interpolationDelayMs;
     const samples = motion.samples;
     if (samples.length === 0) return { x: motion.x, y: motion.y };
     if (renderTime <= samples[0].receivedAt) {
       return { x: samples[0].x, y: samples[0].y };
     }
 
-    while (samples.length > 2 && samples[1].receivedAt < renderTime - INTERPOLATION_DELAY_MS) {
+    while (samples.length > 2 && samples[1].receivedAt < renderTime - this.interpolationDelayMs) {
       samples.shift();
     }
 
@@ -540,7 +545,7 @@ export class MapEntityLayer {
         this.positionMarker(motion.element, point.x, point.y);
         const hasBufferedSamples =
           motion.samples.length > 1 &&
-          now - INTERPOLATION_DELAY_MS < motion.samples[motion.samples.length - 1].receivedAt;
+          now - this.interpolationDelayMs < motion.samples[motion.samples.length - 1].receivedAt;
         if (
           hasBufferedSamples ||
           (age < MAX_EXTRAPOLATION_SECONDS && (motion.velocityX !== 0 || motion.velocityY !== 0))

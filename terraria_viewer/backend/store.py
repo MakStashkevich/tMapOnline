@@ -39,6 +39,8 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         death_retention_seconds: int = 3600,
     ) -> None:
         self._lock = threading.Lock()
+        self._live_update_condition = threading.Condition()
+        self._live_update_sequence = 0
         self._events_file = events_file
         self._history_file = history_file
         self._players_file = players_file
@@ -112,3 +114,22 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._load_events()
         self._load_history()
         self._load_players()
+
+    def notify_live_update(self) -> None:
+        """Wake SSE clients after a new telemetry snapshot has been applied."""
+        with self._live_update_condition:
+            self._live_update_sequence += 1
+            self._live_update_condition.notify_all()
+
+    def wait_for_live_update(self, previous_sequence: int, timeout: float) -> int:
+        """Wait until telemetry advances, while allowing periodic SSE heartbeats."""
+        with self._live_update_condition:
+            self._live_update_condition.wait_for(
+                lambda: self._live_update_sequence != previous_sequence,
+                timeout=max(0.0, timeout),
+            )
+            return self._live_update_sequence
+
+    def live_update_sequence(self) -> int:
+        with self._live_update_condition:
+            return self._live_update_sequence

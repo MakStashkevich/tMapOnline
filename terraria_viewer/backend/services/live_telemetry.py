@@ -196,6 +196,7 @@ class LiveTelemetryMixin(StoreMixinContract):
             boss_status=world.get("bossStatus"),
             telemetry_updated_at=telemetry.generated_at,
         )
+        self.notify_live_update()
     def _save_player_death_locations(
         self, deaths: tuple[PlayerDeath, ...], world: dict[str, Any]
     ) -> None:

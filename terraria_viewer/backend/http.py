@@ -57,6 +57,7 @@ class ServerLogFollower:
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     store: StatusStore
     site_config: dict[str, Any] = {}
 
@@ -129,6 +130,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.store.world_map_live(world_id, since, map_since), ensure_ascii=False
             ).encode("utf-8")
             self._send(200, body, "application/json; charset=utf-8", cache_control="no-store")
+        elif path == "/api/world-map/stream":
+            self._stream_world_map_live(request.query)
         elif path == "/api/world-map":
             params = parse_qs(request.query)
             world_id = params.get("world", [None])[0]
@@ -164,6 +167,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(200, body, "application/json; charset=utf-8")
         elif path == "/healthz":
             self._send(200, b"ok\n", "text/plain; charset=utf-8")
+        elif path == "/api/ping":
+            self._send(204, b"", "text/plain; charset=utf-8", cache_control="no-store")
         elif path.startswith("/player-avatars/"):
             filename = path.rsplit("/", 1)[-1]
             if not re.fullmatch(r"[0-9a-f]{32}\.(?:svg|png)", filename):
@@ -403,6 +408,72 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
+
+    def _stream_world_map_live(self, query: str) -> None:
+        """Stream compact live deltas, keeping map tiles and old history out of the feed."""
+        params = parse_qs(query)
+        world_id = params.get("world", [None])[0]
+        try:
+            since = max(0.0, float(params.get("since", ["0"])[0]))
+            map_since = max(0, int(params.get("map_since", ["0"])[0]))
+            interval_ms = max(50, min(1000, int(params.get("interval_ms", ["50"])[0])))
+        except (TypeError, ValueError):
+            since, map_since, interval_ms = 0.0, 0, 50
+
+        # EventSource reconnects with the last acknowledged position/map cursors.
+        last_event_id = self.headers.get("Last-Event-ID", "")
+        if last_event_id:
+            try:
+                saved_since, saved_map_since = last_event_id.split(",", maxsplit=1)
+                since = max(since, float(saved_since))
+                map_since = max(map_since, int(saved_map_since))
+            except (TypeError, ValueError):
+                pass
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+
+        sequence = self.store.live_update_sequence()
+        started_at = time.monotonic()
+        last_sent_at = 0.0
+        try:
+            while time.monotonic() - started_at < 55:
+                updated_sequence = self.store.wait_for_live_update(sequence, 15)
+                if updated_sequence == sequence:
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    continue
+
+                sequence = updated_sequence
+                while True:
+                    elapsed = time.monotonic() - last_sent_at
+                    remaining = interval_ms / 1000 - elapsed
+                    if remaining <= 0:
+                        break
+                    updated_sequence = self.store.wait_for_live_update(sequence, remaining)
+                    sequence = updated_sequence
+                payload = self.store.world_map_live(world_id, since, map_since)
+                live_players = cast(list[dict[str, Any]], payload.get("players", []))
+                for player in live_players:
+                    points = cast(list[dict[str, Any]], player.get("positions", []))
+                    for point in points:
+                        try:
+                            since = max(since, float(point.get("time", 0) or 0))
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                map_since = max(map_since, int(payload.get("map_revision", map_since) or map_since))
+                body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                event = f"id: {since:.6f},{map_since}\ndata: {body}\n\n".encode("utf-8")
+                self.wfile.write(event)
+                self.wfile.flush()
+                last_sent_at = time.monotonic()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
 
     def log_message(self, format: str, *args: object) -> None:
         return

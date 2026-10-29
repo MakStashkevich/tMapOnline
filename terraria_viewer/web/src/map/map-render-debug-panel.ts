@@ -29,6 +29,15 @@ type DebugMapData = {
   };
   live_payload_bytes?: number;
   live_render_ms?: number;
+  live_request_ms?: number;
+  live_network?: {
+    stream_state?: string;
+    rtt_p50_ms?: number;
+    rtt_p95_ms?: number;
+    arrival_p50_ms?: number;
+    arrival_p95_ms?: number;
+    interpolation_delay_ms?: number;
+  };
   world?: { width?: number; height?: number; spawn_x?: number; spawn_y?: number };
 };
 
@@ -185,6 +194,11 @@ export class MapRenderDebugPanel {
       'beforeend',
       `<div class="render-debug-section-title">Обновления телеметрии</div>
       <div class="render-debug-rows">
+        ${row('Канал обновлений', data?.live_network?.stream_state || 'Подключение')}
+        ${row('Сетевой RTT', data?.live_network?.rtt_p50_ms == null ? 'Нет данных' : `медиана ${data.live_network.rtt_p50_ms.toFixed(1)} мс, p95 ${(data.live_network.rtt_p95_ms || 0).toFixed(1)} мс`)}
+        ${row('Интервал live-событий', data?.live_network?.arrival_p50_ms == null ? 'Нет данных' : `медиана ${data.live_network.arrival_p50_ms.toFixed(1)} мс, p95 ${(data.live_network.arrival_p95_ms || 0).toFixed(1)} мс`)}
+        ${row('Буфер интерполяции', data?.live_network?.interpolation_delay_ms == null ? '80 мс' : `${data.live_network.interpolation_delay_ms.toFixed(0)} мс`)}
+        ${row('Время HTTP-запроса', data?.live_request_ms == null ? 'SSE' : `${data.live_request_ms.toFixed(1)} мс`)}
         ${row('Получение снимков', data?.telemetry?.interval_ms == null ? 'Нет данных' : `${data.telemetry.interval_ms.toFixed(1)} мс`)}
         ${row('Возраст данных', data?.telemetry?.age_seconds == null ? 'Нет данных' : `${(data.telemetry.age_seconds * 1000).toFixed(0)} мс`)}
         ${row('Позиции игроков', `${intervals.player_position_interval_ticks ?? '—'} тиков`)}
