@@ -351,6 +351,7 @@ class WorldMapMixin(StoreMixinContract):
                 "tile_info_updated_at": tile_info_updated_at,
                 "map_revision": map_revision,
                 "map_version": max(map_revision, int(map_updated_at * 1000)),
+                "tile_cache": self._map_tile_pyramid.get_metrics(),
                 "telemetry": {
                     "snapshot_id": self._telemetry_snapshot_id,
                     "received_at": self._telemetry_received_at,
@@ -404,10 +405,9 @@ class WorldMapMixin(StoreMixinContract):
             last_chunk_x = (world_right - 1) // WORLD_MAP_CHUNK_SIZE
             last_chunk_y = (world_bottom - 1) // WORLD_MAP_CHUNK_SIZE
 
-            version = 0
             chunks: list[tuple[int, int, str]] = []
             tile_fingerprint = hashlib.blake2b(digest_size=8)
-            for world in candidates:
+            for candidate_index, world in enumerate(candidates):
                 chunk_times = world.get("base_map_chunk_times")
                 if not isinstance(chunk_times, dict):
                     chunk_times = {}
@@ -415,38 +415,30 @@ class WorldMapMixin(StoreMixinContract):
                     raw_chunks = world.get(field)
                     if not isinstance(raw_chunks, dict):
                         continue
-                    for key, encoded in raw_chunks.items():
-                        if not isinstance(encoded, str):
-                            continue
-                        try:
-                            chunk_x, chunk_y = (int(value) for value in str(key).split(",", 1))
-                        except (TypeError, ValueError):
-                            continue
-                        if not (
-                            first_chunk_x <= chunk_x <= last_chunk_x
-                            and first_chunk_y <= chunk_y <= last_chunk_y
-                        ):
-                            continue
-                        try:
-                            version = max(
-                                version,
-                                int(
-                                    float(
-                                        chunk_times.get(key)
-                                        or world.get("map_updated_at", 0)
-                                        or 0
-                                    )
-                                    * 1000
-                                ),
+                    # Address only chunks intersecting this tile. The old path
+                    # parsed every saved chunk key on every image request.
+                    for chunk_y in range(first_chunk_y, last_chunk_y + 1):
+                        for chunk_x in range(first_chunk_x, last_chunk_x + 1):
+                            chunk_key = f"{chunk_x},{chunk_y}"
+                            encoded = raw_chunks.get(chunk_key)
+                            if not isinstance(encoded, str):
+                                continue
+
+                            chunks.append((chunk_x, chunk_y, encoded))
+                            tile_fingerprint.update(
+                                f"{candidate_index}:{field}:{chunk_key}:".encode("ascii")
                             )
-                        except (TypeError, ValueError, OverflowError):
-                            pass
-                        chunks.append((chunk_x, chunk_y, encoded))
-                        tile_fingerprint.update(f"{chunk_x},{chunk_y}:".encode("ascii"))
-                        tile_fingerprint.update(encoded.encode("ascii"))
+                            stamp = chunk_times.get(chunk_key) if field == "base_map_chunks" else None
+                            if stamp is not None:
+                                # Normal writes stamp changed chunks, so cache
+                                # validation avoids re-hashing their large base64 payloads.
+                                tile_fingerprint.update(str(stamp).encode("ascii"))
+                            else:
+                                # Imported and legacy chunks may not have revision stamps.
+                                tile_fingerprint.update(encoded.encode("ascii"))
 
             fingerprint = int.from_bytes(tile_fingerprint.digest(), "big")
-            cache_key = f"{requested}:{fingerprint}:{level}:{tile_x}:{tile_y}"
+            cache_key = f"{requested}:{width}x{height}:{fingerprint}:{level}:{tile_x}:{tile_y}"
 
         with self._map_tile_generation_lock:
             image = self._map_tile_pyramid.render(
@@ -561,25 +553,26 @@ class WorldMapMixin(StoreMixinContract):
                 else map_revision
             )
             map_delta_reset = map_since > 0 and map_since < oldest_revision - 1
-            map_tile_updates = [] if map_delta_reset else [
-                {
-                    **item,
-                    "updates": [
-                        update
-                        for update in item.get("updates", [])
-                        if isinstance(update, dict)
-                        and is_visible(update.get("x"), update.get("y"))
-                    ],
-                }
-                for item in map_changes
-                if isinstance(item, dict)
-                and int(item.get("revision", 0) or 0) > map_since
-                and any(
-                    isinstance(update, dict)
-                    and is_visible(update.get("x"), update.get("y"))
-                    for update in item.get("updates", [])
-                )
-            ]
+            latest_visible_updates: dict[tuple[int, int], dict[str, Any]] = {}
+            if not map_delta_reset:
+                for batch in map_changes:
+                    if not isinstance(batch, dict) or int(batch.get("revision", 0) or 0) <= map_since:
+                        continue
+                    for update in batch.get("updates", []):
+                        if not isinstance(update, dict) or not is_visible(update.get("x"), update.get("y")):
+                            continue
+                        try:
+                            coordinate = (int(update["x"]), int(update["y"]))
+                        except (KeyError, TypeError, ValueError, OverflowError):
+                            continue
+                        # Edits replace a pixel's color, so only the latest
+                        # visible value for each coordinate needs transmission.
+                        latest_visible_updates[coordinate] = update
+            map_tile_updates = (
+                [{"revision": map_revision, "updates": list(latest_visible_updates.values())}]
+                if latest_visible_updates
+                else []
+            )
             active_npcs = [
                 item.to_payload()
                 for item in self._active_npcs
@@ -600,6 +593,7 @@ class WorldMapMixin(StoreMixinContract):
                 "map_tile_updates": map_tile_updates,
                 "map_revision": map_revision,
                 "map_delta_reset": map_delta_reset,
+                "tile_cache": self._map_tile_pyramid.get_metrics(),
                 "active_npcs": active_npcs,
                 "active_npcs_fresh": telemetry_is_fresh,
                 "coins": visible_coins,

@@ -185,7 +185,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 live_since = max(0.0, float(params.get("live_since", ["0"])[0]))
             except (TypeError, ValueError):
                 live_since = 0.0
-            include_chunks = params.get("tiles", ["0"])[0] != "1"
+            # Keep raw map pixels out of the default response. A caller that
+            # explicitly needs the legacy full payload can pass tiles=0.
+            include_chunks = params.get("tiles", ["1"])[0] == "0"
             body = json.dumps(
                 self.store.world_map(world_id, since, live_since, include_chunks),
                 ensure_ascii=False,

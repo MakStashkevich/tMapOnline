@@ -5,8 +5,26 @@ type RenderMetrics = {
   rendering: boolean;
   canvasBytes: number;
   decodedChunkCount: number;
+  decodedBitmapBytes?: number;
+  bitmapCacheHits?: number;
+  bitmapCacheMisses?: number;
+  sharedTileLoads?: number;
+  bitmapCacheEvictions?: number;
+  pendingTileLoads?: number;
+  failedRenderCount?: number;
   extraCanvasBytes: number;
   spawnMarkerVisible: boolean;
+};
+
+type TileCacheMetrics = {
+  entries?: number;
+  bytes?: number;
+  byte_limit?: number;
+  hits?: number;
+  misses?: number;
+  evictions?: number;
+  renders?: number;
+  last_render_ms?: number;
 };
 
 type DebugChunk = { data?: string | null };
@@ -27,6 +45,7 @@ type DebugMapData = {
     age_seconds?: number | null;
     configured_intervals?: Record<string, number>;
   };
+  tile_cache?: TileCacheMetrics;
   live_payload_bytes?: number;
   live_render_ms?: number;
   live_request_ms?: number;
@@ -177,7 +196,10 @@ export class MapRenderDebugPanel {
         ${row('JavaScript', memoryValue)}
         ${row('Холсты карты', `~${this.formatBytes(render.canvasBytes + render.extraCanvasBytes)}`)}
         ${row('Холсты чанков', String(render.visibleCanvases))}
-        ${row('Декодированные чанки', `${render.decodedChunkCount} — ~${this.formatBytes(render.decodedChunkCount * 64 * 64 * 4)}`)}
+        ${row('Декодированные тайлы', `${render.decodedChunkCount} — ~${this.formatBytes(render.decodedBitmapBytes ?? render.decodedChunkCount * 64 * 64 * 4)}`)}
+        ${row('Кэш браузера', `${render.bitmapCacheHits ?? 0} попаданий, ${render.bitmapCacheMisses ?? 0} запросов, ${render.pendingTileLoads ?? 0} ожидает`)}
+        ${row('Повторно использовано запросов', String(render.sharedTileLoads ?? 0))}
+        ${row('Повторов рендера', String(render.failedRenderCount ?? 0))}
       </div>
       <div class="render-debug-section-title">Карта и слои</div>
       <div class="render-debug-rows">
@@ -188,6 +210,19 @@ export class MapRenderDebugPanel {
         ${row('Точка появления', `${world?.spawn_x ?? '—'}, ${world?.spawn_y ?? '—'}  ${render.spawnMarkerVisible ? 'спрайт загружен' : 'спрайт отсутствует'}`)}
         ${row('Размер мира', `${world?.width || 0} × ${world?.height || 0}`)}
       </div>`;
+
+    const tileCache = data?.tile_cache;
+    this.panel.insertAdjacentHTML(
+      'beforeend',
+      `<div class="render-debug-section-title">Кэш изображений сервера</div>
+      <div class="render-debug-rows">
+        ${row('Занято памяти', `${this.formatBytes(tileCache?.bytes || 0)} из ${this.formatBytes(tileCache?.byte_limit || 0)}`)}
+        ${row('Тайлы в кэше', `${tileCache?.entries || 0} записей`)}
+        ${row('Попадания и промахи', `${tileCache?.hits || 0} и ${tileCache?.misses || 0}`)}
+        ${row('Повторные построения', `${tileCache?.renders || 0}, вытеснено ${tileCache?.evictions || 0}`)}
+        ${row('Последний рендер тайла', `${(tileCache?.last_render_ms || 0).toFixed(1)} мс`)}
+      </div>`,
+    );
 
     const intervals = data?.telemetry?.configured_intervals || {};
     this.panel.insertAdjacentHTML(

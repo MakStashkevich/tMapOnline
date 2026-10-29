@@ -15,6 +15,7 @@ type PyramidLayerOptions = {
 const TILE_SIZE = 256;
 const MAX_LEVEL = 8;
 const MAX_VISIBLE_TILES = 10;
+const MAX_ACTIVE_TILE_CANVASES = 16;
 const MAX_CACHED_BITMAPS = 16;
 const TILE_RENDER_DEBOUNCE_MS = 45;
 const TILE_RENDER_BATCH_SIZE = 4;
@@ -119,18 +120,33 @@ export class MapPyramidLayerRenderer {
     rendering: boolean;
     canvasBytes: number;
     decodedChunkCount: number;
+    decodedBitmapBytes: number;
+    bitmapCacheHits: number;
+    bitmapCacheMisses: number;
+    sharedTileLoads: number;
+    bitmapCacheEvictions: number;
+    pendingTileLoads: number;
+    failedRenderCount: number;
   } {
     let canvasBytes = 0;
     for (const canvas of this.canvases.values()) {
       canvasBytes += canvas.width * canvas.height * 4;
     }
+    const bitmapCache = this.bitmapCache.getMetrics();
     return {
       visibleCanvases: this.canvases.size,
       lastRenderDurationMs: this.lastRenderDurationMs,
       lastRenderChunkCount: this.lastRenderTileCount,
       rendering: this.renderRunning,
       canvasBytes,
-      decodedChunkCount: this.bitmapCache.size,
+      decodedChunkCount: bitmapCache.entries,
+      decodedBitmapBytes: bitmapCache.bytes,
+      bitmapCacheHits: bitmapCache.hits,
+      bitmapCacheMisses: bitmapCache.misses,
+      sharedTileLoads: bitmapCache.sharedLoads,
+      bitmapCacheEvictions: bitmapCache.evictions,
+      pendingTileLoads: bitmapCache.pendingLoads,
+      failedRenderCount: this.failedRenderCount,
     };
   }
 
@@ -392,8 +408,9 @@ export class MapPyramidLayerRenderer {
   }
 
   private removeCanvasesOutside(requiredKeys: Set<string>): void {
+    const retainedKeys = new Set([...requiredKeys].slice(0, MAX_ACTIVE_TILE_CANVASES));
     for (const [key, canvas] of this.canvases) {
-      if (requiredKeys.has(key)) continue;
+      if (retainedKeys.has(key)) continue;
       canvas.remove();
       this.canvases.delete(key);
     }

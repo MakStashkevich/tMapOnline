@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from terraria_viewer.backend.http import start_dashboard
@@ -74,6 +75,24 @@ class ViewerRouteTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.headers.get_content_type(), "image/gif")
             self.assertEqual(response.read(), b"GIF89a test image")
+
+    def test_world_map_omits_full_chunk_payload_by_default(self) -> None:
+        def fake_world_map(
+            world_id: str | None,
+            since: float,
+            live_since: float,
+            include_chunks: bool,
+        ) -> dict[str, object]:
+            return {"base_chunks": [{"x": 0, "y": 0}] if include_chunks else []}
+
+        with patch.object(self.store, "world_map", side_effect=fake_world_map):
+            with urlopen(self.base + "/api/world-map", timeout=3) as response:
+                compact = json.loads(response.read())
+            with urlopen(self.base + "/api/world-map?tiles=0", timeout=3) as response:
+                full = json.loads(response.read())
+
+        self.assertEqual(compact["base_chunks"], [])
+        self.assertEqual(full["base_chunks"], [{"x": 0, "y": 0}])
 
 
 if __name__ == "__main__":

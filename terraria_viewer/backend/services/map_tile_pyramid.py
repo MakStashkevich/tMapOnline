@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import time
 import zlib
 from collections import OrderedDict
 from io import BytesIO
@@ -18,10 +19,31 @@ class MapTilePyramid:
     TILE_SIZE = 256
     CHUNK_SIZE = 64
 
-    def __init__(self, cache_limit: int = 96) -> None:
+    def __init__(self, cache_limit: int = 128, cache_byte_limit: int = 32 * 1024 * 1024) -> None:
         self._cache_limit = cache_limit
+        self._cache_byte_limit = cache_byte_limit
         self._cache: OrderedDict[str, bytes] = OrderedDict()
+        self._cache_bytes = 0
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._cache_evictions = 0
+        self._render_count = 0
+        self._last_render_ms = 0.0
         self._lock = Lock()
+
+    def get_metrics(self) -> dict[str, int | float]:
+        """Return bounded-cache and last-render metrics for the debug view."""
+        with self._lock:
+            return {
+                "entries": len(self._cache),
+                "bytes": self._cache_bytes,
+                "byte_limit": self._cache_byte_limit,
+                "hits": self._cache_hits,
+                "misses": self._cache_misses,
+                "evictions": self._cache_evictions,
+                "renders": self._render_count,
+                "last_render_ms": round(self._last_render_ms, 2),
+            }
 
     def render(
         self,
@@ -37,8 +59,12 @@ class MapTilePyramid:
         with self._lock:
             cached = self._cache.get(cache_key)
             if cached is not None:
+                self._cache_hits += 1
                 self._cache.move_to_end(cache_key)
                 return cached
+            self._cache_misses += 1
+
+        started_at = time.perf_counter()
 
         factor = 1 << max(0, min(level, 8))
         world_left = tile_x * self.TILE_SIZE * factor
@@ -117,14 +143,29 @@ class MapTilePyramid:
                     )
             chunk.close()
 
-        buffer = BytesIO()
-        output.save(buffer, format="PNG", optimize=False)
-        tile = buffer.getvalue()
-        output.close()
+        try:
+            buffer = BytesIO()
+            output.save(buffer, format="PNG", optimize=False)
+            tile = buffer.getvalue()
+            output.close()
+        except BaseException:
+            output.close()
+            raise
 
         with self._lock:
-            self._cache[cache_key] = tile
-            self._cache.move_to_end(cache_key)
-            while len(self._cache) > self._cache_limit:
-                self._cache.popitem(last=False)
+            self._render_count += 1
+            self._last_render_ms = (time.perf_counter() - started_at) * 1000
+            if len(tile) <= self._cache_byte_limit:
+                previous = self._cache.pop(cache_key, None)
+                if previous is not None:
+                    self._cache_bytes -= len(previous)
+                self._cache[cache_key] = tile
+                self._cache_bytes += len(tile)
+                while (
+                    len(self._cache) > self._cache_limit
+                    or self._cache_bytes > self._cache_byte_limit
+                ):
+                    _, evicted = self._cache.popitem(last=False)
+                    self._cache_bytes -= len(evicted)
+                    self._cache_evictions += 1
         return tile

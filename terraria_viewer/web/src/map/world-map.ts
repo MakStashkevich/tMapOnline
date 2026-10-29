@@ -1081,6 +1081,7 @@ const modules = await activateModules('world_map');
       return;
     }
     applyMapTileUpdates(payload.map_tile_updates || []);
+    if (payload.tile_cache) data.tile_cache = payload.tile_cache;
     liveSince = Math.max(liveSince, Number(payload.position_cursor) || 0);
     mapRevision = Number(payload.map_revision) || mapRevision;
     data.map_revision = mapRevision;

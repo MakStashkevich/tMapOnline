@@ -5,6 +5,8 @@ import { MapTileBitmapCache } from '../../terraria_viewer/web/src/map/map-tile-b
 
 function makeBitmap() {
   return {
+    width: 256,
+    height: 256,
     closeCount: 0,
     close() {
       this.closeCount += 1;
@@ -57,6 +59,8 @@ test('evicts the least recently used bitmap and closes it', async () => {
   assert.equal(first.closeCount, 0);
   assert.equal(second.closeCount, 1);
   assert.equal(third.closeCount, 0);
+  assert.equal(cache.getMetrics().bytes, 2 * 256 * 256 * 4);
+  assert.equal(cache.getMetrics().evictions, 1);
 });
 
 test('does not cache a response invalidated while it was loading', async () => {
