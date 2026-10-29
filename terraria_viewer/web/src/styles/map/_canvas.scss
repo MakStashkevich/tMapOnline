@@ -20,31 +20,47 @@
 .map-viewport.dragging {
   cursor: grabbing;
 }
+.map-viewport.map-loaded {
+  background-color: #05090d;
+  background-image: none;
+}
 .map-stage {
   position: relative;
   flex: 0 0 auto;
   margin: auto;
-  background: #05090d;
-  box-shadow: 0 0 0 1px #34475a;
-  overflow: hidden;
-}
-#map-preview,
-#chunk-layer,
-.map-stage #paths {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-#map-preview {
-  image-rendering: auto;
+  background: transparent;
 }
 #chunk-layer {
-  overflow: hidden;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.map-stage #paths {
+  position: absolute;
+  inset: auto;
+  pointer-events: none;
 }
 .map-chunk {
   position: absolute;
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.map-pyramid-tile {
+  position: absolute;
+  display: block;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+#fog-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
   display: block;
   image-rendering: pixelated;
   pointer-events: none;

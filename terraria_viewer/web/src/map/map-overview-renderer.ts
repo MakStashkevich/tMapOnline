@@ -1,6 +1,17 @@
 import { MapChunkCodec, type MapChunkSource } from './map-chunk-codec';
 
 type WorldDimensions = { id: string | number; width: number; height: number };
+export type OverviewViewport = {
+  worldLeft: number;
+  worldTop: number;
+  worldWidth: number;
+  worldHeight: number;
+  screenLeft: number;
+  screenTop: number;
+  screenWidth: number;
+  screenHeight: number;
+  pixelRatio: number;
+};
 
 type OverviewRendererOptions = {
   canvas: HTMLCanvasElement;
@@ -27,6 +38,7 @@ export class MapOverviewRenderer {
   private buildToken = 0;
   private buildRunning = false;
   private buildPending = false;
+  private viewport: OverviewViewport | null = null;
 
   constructor(private readonly options: OverviewRendererOptions) {}
 
@@ -38,37 +50,35 @@ export class MapOverviewRenderer {
     return this.sourceCanvas;
   }
 
-  resetWorld(width: number, height: number): void {
+  resetWorld(): void {
     this.buildToken++;
     this.sourceCanvas = null;
     this.sourceReady = false;
     this.readyKey = '';
     this.requestedKey = '';
-    this.options.canvas.width = Math.ceil(width * this.options.overviewScale);
-    this.options.canvas.height = Math.ceil(height * this.options.overviewScale);
   }
 
-  draw(): void {
-    if (!this.sourceReady || !this.sourceCanvas) return;
+  draw(viewport?: OverviewViewport | null): void {
+    if (viewport !== undefined) this.viewport = viewport;
+    if (!this.viewport) return;
+    this.layoutViewportCanvas(this.viewport);
+    const visibleArea = this.viewport;
+
     const context = this.options.canvas.getContext('2d');
     if (!context) return;
 
     context.globalCompositeOperation = 'source-over';
     context.clearRect(0, 0, this.options.canvas.width, this.options.canvas.height);
+    if (!this.sourceReady || !this.sourceCanvas) return;
+
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
-    context.drawImage(
-      this.sourceCanvas,
-      0,
-      0,
-      this.options.canvas.width,
-      this.options.canvas.height,
-    );
+    this.drawVisibleWorld(context, this.sourceCanvas, visibleArea);
 
     const maskCanvas = this.options.getMaskCanvas();
     if (!this.options.isFullMapEnabled() && maskCanvas) {
       context.globalCompositeOperation = 'destination-in';
-      context.drawImage(maskCanvas, 0, 0, this.options.canvas.width, this.options.canvas.height);
+      this.drawVisibleWorld(context, maskCanvas, visibleArea);
       context.globalCompositeOperation = 'source-over';
     }
   }
@@ -86,8 +96,6 @@ export class MapOverviewRenderer {
         return false;
       }
 
-      this.options.canvas.width = expectedWidth;
-      this.options.canvas.height = expectedHeight;
       this.sourceCanvas = document.createElement('canvas');
       this.sourceCanvas.width = expectedWidth;
       this.sourceCanvas.height = expectedHeight;
@@ -255,6 +263,62 @@ export class MapOverviewRenderer {
   private parseKey(key: string): [number, number] {
     const [chunkX, chunkY] = key.split(',').map(Number);
     return [chunkX, chunkY];
+  }
+
+  private layoutViewportCanvas(viewport: OverviewViewport): void {
+    const canvas = this.options.canvas;
+    const pixelRatio = Math.max(1, Math.min(1.5, viewport.pixelRatio));
+    const width = Math.max(1, Math.ceil(viewport.screenWidth * pixelRatio));
+    const height = Math.max(1, Math.ceil(viewport.screenHeight * pixelRatio));
+
+    // Keep the displayed preview bounded by the screen, even when the world is deeply zoomed.
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    canvas.style.left = `${viewport.screenLeft}px`;
+    canvas.style.top = `${viewport.screenTop}px`;
+    canvas.style.width = `${viewport.screenWidth}px`;
+    canvas.style.height = `${viewport.screenHeight}px`;
+  }
+
+  private drawVisibleWorld(
+    context: CanvasRenderingContext2D,
+    source: HTMLCanvasElement,
+    viewport: OverviewViewport,
+  ): void {
+    const world = this.options.getWorld();
+    if (!world) return;
+
+    const sourceLeft = viewport.worldLeft * (source.width / world.width);
+    const sourceTop = viewport.worldTop * (source.height / world.height);
+    const sourceWidth = viewport.worldWidth * (source.width / world.width);
+    const sourceHeight = viewport.worldHeight * (source.height / world.height);
+    const clippedLeft = Math.max(0, sourceLeft);
+    const clippedTop = Math.max(0, sourceTop);
+    const clippedRight = Math.min(source.width, sourceLeft + sourceWidth);
+    const clippedBottom = Math.min(source.height, sourceTop + sourceHeight);
+
+    if (clippedRight <= clippedLeft || clippedBottom <= clippedTop) return;
+
+    // Clip source coordinates explicitly and preserve their matching screen offset.
+    // This avoids stretching the map when the viewport extends past a world edge.
+    const destinationLeft = ((clippedLeft - sourceLeft) / sourceWidth) * this.options.canvas.width;
+    const destinationTop = ((clippedTop - sourceTop) / sourceHeight) * this.options.canvas.height;
+    const destinationWidth =
+      ((clippedRight - clippedLeft) / sourceWidth) * this.options.canvas.width;
+    const destinationHeight =
+      ((clippedBottom - clippedTop) / sourceHeight) * this.options.canvas.height;
+
+    context.drawImage(
+      source,
+      clippedLeft,
+      clippedTop,
+      clippedRight - clippedLeft,
+      clippedBottom - clippedTop,
+      destinationLeft,
+      destinationTop,
+      destinationWidth,
+      destinationHeight,
+    );
   }
 
   private nextFrame(): Promise<void> {

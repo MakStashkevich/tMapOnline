@@ -94,7 +94,10 @@ export class MapEntityLayer {
   private animationFrame: number | null = null;
   private animationEnabled = true;
 
-  constructor(private readonly root: HTMLElement) {}
+  constructor(
+    private readonly root: HTMLElement,
+    private readonly isPointVisible: (x: number, y: number) => boolean = () => true,
+  ) {}
 
   setWorld(world: MapEntityWorld): void {
     this.world = world;
@@ -234,7 +237,7 @@ export class MapEntityLayer {
     const activeIds = new Set<string>();
     for (const player of players) {
       const point = this.markerPosition(player);
-      if (!point || !player.avatar_url) continue;
+      if (!point || !player.avatar_url || !this.isPointVisible(point.x, point.y)) continue;
       activeIds.add(player.id);
       let motion = this.playerMotions.get(player.id);
       if (motion && motion.spriteUrl !== player.avatar_url) {
@@ -304,7 +307,8 @@ export class MapEntityLayer {
         y < 0 ||
         x >= this.world.width ||
         y >= this.world.height ||
-        !entity.icon_url
+        !entity.icon_url ||
+        !this.isPointVisible(x, y)
       )
         continue;
       const id = String(entity.id);
@@ -574,7 +578,8 @@ export class MapEntityLayer {
         x < 0 ||
         y < 0 ||
         x >= this.world.width ||
-        y >= this.world.height
+        y >= this.world.height ||
+        !this.isPointVisible(x, y)
       )
         continue;
       void this.appendCoinMarker(layer, coin, x, y, stack, renderVersion);
@@ -617,7 +622,8 @@ export class MapEntityLayer {
         x < 0 ||
         y < 0 ||
         x >= this.world.width ||
-        y >= this.world.height
+        y >= this.world.height ||
+        !this.isPointVisible(x, y)
       )
         continue;
       void this.appendDeathMarker(layer, death, x, y, renderVersion);
@@ -686,7 +692,8 @@ export class MapEntityLayer {
         x < 0 ||
         y < 0 ||
         x >= this.world.width ||
-        y >= this.world.height
+        y >= this.world.height ||
+        !this.isPointVisible(x, y)
       )
         continue;
       const type = String(pylon.type || '');

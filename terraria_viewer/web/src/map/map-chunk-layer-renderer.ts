@@ -38,15 +38,25 @@ export class MapChunkLayerRenderer {
   constructor(private readonly options: ChunkLayerOptions) {}
 
   layout(): void {
-    const { getScale, getWorld } = this.options;
-    const world = getWorld();
-    if (!world) return;
-
+    const { getScale } = this.options;
     const scale = getScale();
-    this.options.layer.style.width = `${world.width}px`;
-    this.options.layer.style.height = `${world.height}px`;
-    this.options.layer.style.transformOrigin = 'top left';
-    this.options.layer.style.transform = `scale(${scale})`;
+
+    // The stage is only a scroll surface. Keep this layer zero-sized so Safari
+    // does not allocate a giant compositing surface for the entire zoomed world.
+    this.options.layer.style.width = '0';
+    this.options.layer.style.height = '0';
+    this.options.layer.style.transform = 'none';
+
+    for (const [key, canvas] of this.canvases) {
+      this.positionCanvas(canvas, key, this.options.getChunkSize(), scale);
+    }
+  }
+
+  isDetailZoom(): boolean {
+    return (
+      this.options.getScale() >=
+      Math.max(CHUNK_DETAIL_SCALE_MIN, this.options.getFitScale() * CHUNK_DETAIL_FIT_MULTIPLIER)
+    );
   }
 
   requestRender(): void {
@@ -241,10 +251,7 @@ export class MapChunkLayerRenderer {
     }
 
     const [chunkX, chunkY] = this.parseKey(key);
-    canvas.style.left = `${chunkX * chunkSize}px`;
-    canvas.style.top = `${chunkY * chunkSize}px`;
-    canvas.style.width = `${chunkSize}px`;
-    canvas.style.height = `${chunkSize}px`;
+    this.positionCanvas(canvas, key, chunkSize, this.options.getScale());
     if (replace) {
       if (version !== this.renderVersion) return;
       this.options.layer.append(canvas);
@@ -280,6 +287,25 @@ export class MapChunkLayerRenderer {
   private removeAllCanvases(): void {
     for (const canvas of this.canvases.values()) canvas.remove();
     this.canvases.clear();
+  }
+
+  private positionCanvas(
+    canvas: HTMLCanvasElement,
+    key: string,
+    chunkSize: number,
+    scale: number,
+  ): void {
+    const [chunkX, chunkY] = this.parseKey(key);
+    const left = Math.floor(chunkX * chunkSize * scale);
+    const top = Math.floor(chunkY * chunkSize * scale);
+    const right = Math.ceil((chunkX + 1) * chunkSize * scale);
+    const bottom = Math.ceil((chunkY + 1) * chunkSize * scale);
+
+    canvas.style.left = `${left}px`;
+    canvas.style.top = `${top}px`;
+    // Adjacent canvases share rounded boundaries to avoid one-pixel seams at fractional zoom.
+    canvas.style.width = `${right - left}px`;
+    canvas.style.height = `${bottom - top}px`;
   }
 
   private parseKey(key: string): [number, number] {

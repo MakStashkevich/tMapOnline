@@ -100,6 +100,8 @@ class StoreMixinContract(Protocol):
     _world_map_cache: dict[str, dict[str, Any]]
     _world_map_cache_dirty: bool
     _world_map_cache_last_saved_at: float
+    _map_tile_pyramid: Any
+    _map_tile_generation_lock: Any
     _events: list[dict[str, Any]]
     _history: list[dict[str, Any]]
     _players: dict[str, dict[str, Any]]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import gzip
 import mimetypes
 import re
 import threading
@@ -115,6 +116,42 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(404, b"tile details not available\n", "text/plain; charset=utf-8")
             else:
                 self._send(200, json.dumps(tile, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", cache_control="no-store")
+        elif path == "/api/world-map/tile":
+            params = parse_qs(request.query)
+            try:
+                level = int(params.get("level", ["0"])[0])
+                tile_x = int(params.get("x", ["0"])[0])
+                tile_y = int(params.get("y", ["0"])[0])
+            except (TypeError, ValueError):
+                self._send(400, b"invalid map tile coordinates\n", "text/plain; charset=utf-8")
+                return
+            if level < 0 or level > 8 or tile_x < 0 or tile_y < 0:
+                self._send(400, b"map tile coordinates are out of range\n", "text/plain; charset=utf-8")
+                return
+            tile = self.store.world_map_image_tile(
+                params.get("world", [None])[0], level, tile_x, tile_y
+            )
+            if tile is None:
+                self._send(404, b"map tile is unavailable\n", "text/plain; charset=utf-8")
+            else:
+                body, version = tile
+                entity_tag = f'"{version:x}"'
+                cache_control = "public, max-age=0, must-revalidate"
+                if self.headers.get("If-None-Match") == entity_tag:
+                    self.send_response(304)
+                    self.send_header("ETag", entity_tag)
+                    self.send_header("Cache-Control", cache_control)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", cache_control)
+                self.send_header("ETag", entity_tag)
+                self.send_header("X-Map-Tile-Version", str(version))
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
         elif path == "/api/world-map/live":
             params = parse_qs(request.query)
             world_id = params.get("world", [None])[0]
@@ -126,8 +163,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 map_since = max(0, int(params.get("map_since", ["0"])[0]))
             except (TypeError, ValueError):
                 map_since = 0
+            bounds = self._live_view_bounds(params)
+            include_coins = params.get("coins", ["0"])[0] == "1"
             body = json.dumps(
-                self.store.world_map_live(world_id, since, map_since), ensure_ascii=False
+                self.store.world_map_live(
+                    world_id, since, map_since, bounds, include_coins
+                ),
+                ensure_ascii=False,
             ).encode("utf-8")
             self._send(200, body, "application/json; charset=utf-8", cache_control="no-store")
         elif path == "/api/world-map/stream":
@@ -143,8 +185,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 live_since = max(0.0, float(params.get("live_since", ["0"])[0]))
             except (TypeError, ValueError):
                 live_since = 0.0
-            body = json.dumps(self.store.world_map(world_id, since, live_since), ensure_ascii=False).encode("utf-8")
-            self._send(200, body, "application/json; charset=utf-8", cache_control="no-store")
+            include_chunks = params.get("tiles", ["0"])[0] != "1"
+            body = json.dumps(
+                self.store.world_map(world_id, since, live_since, include_chunks),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "").lower()
+            content_encoding = None
+            if accepts_gzip and len(body) >= 1024:
+                body = gzip.compress(body, compresslevel=1, mtime=0)
+                content_encoding = "gzip"
+            self._send(
+                200,
+                body,
+                "application/json; charset=utf-8",
+                cache_control="no-store",
+                content_encoding=content_encoding,
+            )
         elif path == "/api/world-map/exploration":
             params = parse_qs(request.query)
             player_id = params.get("id", [""])[0]
@@ -400,9 +457,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             temporary_meta.replace(meta_path)
             return body, content_type, cache_seconds
 
-    def _send(self, status: int, body: bytes, content_type: str, *, cache_control: str = "no-store, max-age=0") -> None:
+    def _send(
+        self,
+        status: int,
+        body: bytes,
+        content_type: str,
+        *,
+        cache_control: str = "no-store, max-age=0",
+        content_encoding: str | None = None,
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        if content_encoding:
+            self.send_header("Content-Encoding", content_encoding)
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -413,6 +481,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         """Stream compact live deltas, keeping map tiles and old history out of the feed."""
         params = parse_qs(query)
         world_id = params.get("world", [None])[0]
+        bounds = self._live_view_bounds(params)
+        include_coins = params.get("coins", ["0"])[0] == "1"
         try:
             since = max(0.0, float(params.get("since", ["0"])[0]))
             map_since = max(0, int(params.get("map_since", ["0"])[0]))
@@ -457,7 +527,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         break
                     updated_sequence = self.store.wait_for_live_update(sequence, remaining)
                     sequence = updated_sequence
-                payload = self.store.world_map_live(world_id, since, map_since)
+                payload = self.store.world_map_live(
+                    world_id, since, map_since, bounds, include_coins
+                )
+                since = max(since, float(payload.get("position_cursor", since) or since))
                 live_players = cast(list[dict[str, Any]], payload.get("players", []))
                 for player in live_players:
                     points = cast(list[dict[str, Any]], player.get("positions", []))
@@ -474,6 +547,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 last_sent_at = time.monotonic()
         except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
             return
+
+    @staticmethod
+    def _live_view_bounds(
+        params: dict[str, list[str]],
+    ) -> tuple[float, float, float, float] | None:
+        """Parse a viewport rectangle; malformed bounds fall back to legacy full updates."""
+        try:
+            bounds = tuple(float(params[key][0]) for key in ("left", "top", "right", "bottom"))
+        except (KeyError, IndexError, TypeError, ValueError, OverflowError):
+            return None
+        left, top, right, bottom = bounds
+        if right <= left or bottom <= top:
+            return None
+        return left, top, right, bottom
 
     def log_message(self, format: str, *args: object) -> None:
         return

@@ -1,6 +1,5 @@
 import { activateModules } from '../core/modules';
 import { renderIcons } from '../core/icons';
-import { MapSnapshotCache } from './map-snapshot-cache';
 import { MapChunkCodec, type MapChunkSource } from './map-chunk-codec';
 import { MapViewportController } from './map-viewport-controller';
 import { MapEntityLayer } from './map-entity-layer';
@@ -8,9 +7,8 @@ import { MapTooltipController } from './map-tooltip-controller';
 import { MapPlayerPathService } from './map-player-path-service';
 import { MapRouteLayer } from './map-route-layer';
 import { MapDiagnosticsPanel } from './map-diagnostics-panel';
-import { MapChunkLayerRenderer } from './map-chunk-layer-renderer';
+import { MapPyramidLayerRenderer } from './map-pyramid-layer-renderer';
 import { MapExplorationMask } from './map-exploration-mask';
-import { MapOverviewRenderer } from './map-overview-renderer';
 import { MapImageExporter } from './map-image-exporter';
 import { MapRenderDebugPanel } from './map-render-debug-panel';
 
@@ -55,12 +53,7 @@ const modules = await activateModules('world_map');
     '#b8d87a',
   ];
   const MASK_SCALE = 0.25;
-  const OVERVIEW_SCALE = MASK_SCALE;
   const ANIMATED_MARKER_ZOOM_THRESHOLD = 15;
-  // Bump whenever overview composition or its pixel scale changes. IndexedDB
-  // keeps this bitmap across reloads, so a stale preview can otherwise hide a
-  // correct map assembled from the current chunks indefinitely.
-  const OVERVIEW_VERSION = 6;
   let data = null,
     scale = 1,
     fitScale = 1,
@@ -97,12 +90,11 @@ const modules = await activateModules('world_map');
     renderDebugWindowEnabled = debugMode && savedRenderDebugPreference !== 'false';
   } catch {}
   let chunkOwners = new Map(),
-    explorationImageCache = new Map(),
-    overviewDirtyChunks = new Set();
+    explorationImageCache = new Map();
   let maskCanvas = null,
+    fogCanvas = $('fog-layer') as HTMLCanvasElement,
     explorationMask = null,
     maskPlayersKey = '',
-    maskVersion = 0,
     routeKey = '',
     markerKey = '',
     entityRenderKey = '',
@@ -113,10 +105,6 @@ const modules = await activateModules('world_map');
     toggleKey = '',
     canvasWorld = '',
     chunkSize = 64;
-  let overviewSaveTimer = null;
-  let baseMapRevision = 0,
-    lastSnapshotSavedAt = 0;
-  const mapSnapshotCache = new MapSnapshotCache<any>();
   const mapChunkCodec = new MapChunkCodec();
   const mapImageExporter = new MapImageExporter({
     button: $('download-map'),
@@ -130,61 +118,39 @@ const modules = await activateModules('world_map');
     onError: (error) =>
       status(`Не удалось скачать карту: ${error instanceof Error ? error.message : String(error)}`),
   });
-  const overviewRenderer = new MapOverviewRenderer({
-    canvas: $('map-preview'),
-    codec: mapChunkCodec,
-    overviewScale: OVERVIEW_SCALE,
-    getWorld: () => data?.world || null,
-    getChunkSize: () => chunkSize,
-    getChunkOwners: () => chunkOwners,
-    getDirtyChunks: () => overviewDirtyChunks as Set<string>,
-    clearDirtyChunks: () => overviewDirtyChunks.clear(),
-    getMaskCanvas: () => maskCanvas,
-    isFullMapEnabled: () => fullMapEnabled,
-    getRevision: () => baseMapRevision,
-    onReady: () => {
-      queueMapSnapshotSave();
-      requestVisibleChunkRender();
-    },
-    onError: (error) =>
-      status(
-        `Не удалось подготовить обзор карты: ${error instanceof Error ? error.message : String(error)}`,
-      ),
-  });
-  const chunkLayerRenderer = new MapChunkLayerRenderer({
+  const chunkLayerRenderer = new MapPyramidLayerRenderer({
     layer: $('chunk-layer'),
     viewport: $('viewport'),
     stage: $('stage'),
-    codec: mapChunkCodec,
     getWorld: () => (data?.world ? data.world : null),
     getScale: () => scale,
-    getFitScale: () => fitScale,
-    getChunkSize: () => chunkSize,
-    getMaskCanvas: () => maskCanvas,
-    getMaskVersion: () => maskVersion,
-    isFullMapEnabled: () => fullMapEnabled,
-    getChunkOwners: () => chunkOwners,
     onError: (error) =>
       status(
-        `Не удалось отрисовать карту: ${error instanceof Error ? error.message : String(error)}`,
+        `Не удалось загрузить фрагмент карты: ${error instanceof Error ? error.message : String(error)}`,
       ),
-    maskScale: MASK_SCALE,
   });
   const renderDebugPanel = debugMode
     ? new MapRenderDebugPanel($('map-render-debug-window'), () => {
-        const preview = $('map-preview');
         const mask = maskCanvas;
         return {
           ...chunkLayerRenderer.getDebugMetrics(),
-          extraCanvasBytes:
-            (preview instanceof HTMLCanvasElement ? preview.width * preview.height * 4 : 0) +
-            (mask ? mask.width * mask.height * 4 : 0),
+          extraCanvasBytes: mask ? mask.width * mask.height * 4 : 0,
           spawnMarkerVisible: Boolean($('spawn')?.querySelector('.spawn-marker')),
         };
       })
     : null;
   renderDebugPanel?.setEnabled(renderDebugWindowEnabled);
-  const mapEntityLayer = new MapEntityLayer($('stage'));
+  const mapEntityLayer = new MapEntityLayer($('stage'), (x, y) => {
+    const viewport = getVisibleViewport();
+    const padding = Number(data?.chunk_size || 64);
+    return Boolean(
+      viewport &&
+      x >= viewport.worldLeft - padding &&
+      x <= viewport.worldLeft + viewport.worldWidth + padding &&
+      y >= viewport.worldTop - padding &&
+      y <= viewport.worldTop + viewport.worldHeight + padding,
+    );
+  });
   const routeLayer = new MapRouteLayer($('route-layer'), colors);
   const mapDiagnostics = new MapDiagnosticsPanel(Boolean(debugMode));
   const playerPaths = new MapPlayerPathService();
@@ -246,40 +212,148 @@ const modules = await activateModules('world_map');
     view.scrollLeft = contentLeft + worldX * scale - anchorX;
     view.scrollTop = contentTop + worldY * scale - anchorY;
   };
-  const readMapSnapshot = () => mapSnapshotCache.read();
-  const saveMapSnapshot = async (preview) => {
-    if (!data || !preview) return;
+  const getVisibleViewport = () => {
+    if (!data) return null;
+    const viewport = $('viewport');
+    const stage = $('stage');
+    const viewportRect = viewport.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const contentLeft = stageRect.left - viewportRect.left + viewport.scrollLeft;
+    const contentTop = stageRect.top - viewportRect.top + viewport.scrollTop;
+    const screenLeft = viewport.scrollLeft - contentLeft;
+    const screenTop = viewport.scrollTop - contentTop;
 
-    // Cache the API snapshot and preview together so startup can paint before the next API request.
-    await mapSnapshotCache.save({
-      data,
-      preview,
-      previewVersion: OVERVIEW_VERSION,
-      baseMapRevision,
-      savedAt: Date.now(),
-    });
-    lastSnapshotSavedAt = Date.now();
+    return {
+      worldLeft: screenLeft / scale,
+      worldTop: screenTop / scale,
+      worldWidth: viewport.clientWidth / scale,
+      worldHeight: viewport.clientHeight / scale,
+      screenLeft,
+      screenTop,
+      screenWidth: viewport.clientWidth,
+      screenHeight: viewport.clientHeight,
+    };
   };
-  const queueMapSnapshotSave = () => {
-    const sourceCanvas = overviewRenderer.source;
-    if (!data || !overviewRenderer.isReady || !sourceCanvas?.toBlob) return;
-    if (Date.now() - lastSnapshotSavedAt < 20000) return;
-    clearTimeout(overviewSaveTimer);
-    overviewSaveTimer = setTimeout(
-      () =>
-        sourceCanvas.toBlob((blob) => {
-          if (blob) saveMapSnapshot(blob).catch(() => {});
-        }, 'image/png'),
-      800,
+  const drawOverview = () => {
+    const visibleArea = getVisibleViewport();
+    if (!data || !visibleArea) return;
+
+    const paths = $('paths');
+    paths.setAttribute(
+      'viewBox',
+      `${visibleArea.worldLeft} ${visibleArea.worldTop} ${visibleArea.worldWidth} ${visibleArea.worldHeight}`,
     );
+    paths.style.left = `${visibleArea.screenLeft}px`;
+    paths.style.top = `${visibleArea.screenTop}px`;
+    paths.style.width = `${visibleArea.screenWidth}px`;
+    paths.style.height = `${visibleArea.screenHeight}px`;
   };
-  const drawOverview = () => overviewRenderer.draw();
-  const downloadMapImage = () => mapImageExporter.download();
-  const restoreOverview = (blob) => overviewRenderer.restore(blob);
+  const layoutFogCanvas = () => {
+    if (!data?.world) return;
+    fogCanvas.style.width = `${data.world.width * scale}px`;
+    fogCanvas.style.height = `${data.world.height * scale}px`;
+  };
+  const updateFogCanvas = () => {
+    if (!maskCanvas || !data?.world) return;
+    const context = fogCanvas.getContext('2d');
+    if (!context) return;
+
+    if (fogCanvas.width !== maskCanvas.width || fogCanvas.height !== maskCanvas.height) {
+      fogCanvas.width = maskCanvas.width;
+      fogCanvas.height = maskCanvas.height;
+    }
+    layoutFogCanvas();
+    fogCanvas.style.display = fullMapEnabled ? 'none' : 'block';
+    context.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+    if (fullMapEnabled) return;
+
+    context.fillStyle = '#05090d';
+    context.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
+    context.globalCompositeOperation = 'destination-out';
+    context.imageSmoothingEnabled = false;
+    context.drawImage(maskCanvas, 0, 0);
+    context.globalCompositeOperation = 'source-over';
+  };
+  let liveBoundsTimer: ReturnType<typeof setTimeout> | null = null;
+  let liveSubscriptionKey = '';
+  let renderedViewportKey = '';
+  const appendLiveViewportParams = (params: URLSearchParams) => {
+    const viewport = getVisibleViewport();
+    if (!viewport || !data) return;
+    const chunk = Number(data.chunk_size || 64);
+    const left = Math.max(0, Math.floor((viewport.worldLeft - chunk) / chunk) * chunk);
+    const top = Math.max(0, Math.floor((viewport.worldTop - chunk) / chunk) * chunk);
+    const right = Math.min(
+      Number(data.world.width),
+      Math.ceil((viewport.worldLeft + viewport.worldWidth + chunk) / chunk) * chunk,
+    );
+    const bottom = Math.min(
+      Number(data.world.height),
+      Math.ceil((viewport.worldTop + viewport.worldHeight + chunk) / chunk) * chunk,
+    );
+    params.set('left', String(left));
+    params.set('top', String(top));
+    params.set('right', String(Math.max(left + 1, right)));
+    params.set('bottom', String(Math.max(top + 1, bottom)));
+    params.set('coins', viewport.worldWidth <= 256 && viewport.worldHeight <= 256 ? '1' : '0');
+  };
+  const getLiveViewportKey = () => {
+    const params = new URLSearchParams();
+    appendLiveViewportParams(params);
+    return params.toString();
+  };
+  const scheduleVisibleLiveRefresh = () => {
+    if (liveBoundsTimer) clearTimeout(liveBoundsTimer);
+    liveBoundsTimer = setTimeout(() => {
+      liveBoundsTimer = null;
+      const nextViewportKey = getLiveViewportKey();
+      if (nextViewportKey === renderedViewportKey) return;
+      renderedViewportKey = nextViewportKey;
+      markerKey = '';
+      entityRenderKey = '';
+      coinRenderKey = '';
+      deathRenderKey = '';
+      renderLiveLayers();
+      updateLiveStreamCadence();
+    }, 300);
+  };
+  const downloadMapImage = async () => {
+    if (!data?.world?.id) return;
+
+    const currentData = data;
+    try {
+      const params = new URLSearchParams({ world: String(currentData.world.id) });
+      const response = await fetch(`/api/world-map?${params}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      // The complete chunk set is fetched only for an explicit full-resolution export.
+      data = await response.json();
+      updateChunkOwners(
+        Number(data.world.width),
+        Number(data.world.height),
+        Number(data.chunk_size || 64),
+        data.players || [],
+      );
+      await mapImageExporter.download();
+    } catch (error) {
+      status(
+        `Не удалось подготовить PNG: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      data = currentData;
+      updateChunkOwners(
+        Number(data.world.width),
+        Number(data.world.height),
+        Number(data.chunk_size || 64),
+        data.players || [],
+      );
+      requestVisibleChunkRender();
+    }
+  };
   const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  const buildOverview = () => overviewRenderer.build();
   const setScale = (next, anchorX = null, anchorY = null) => {
     if (!data) return;
+    $('viewport').classList.add('map-loaded');
     const worldPoint = anchorX == null ? null : worldPointAt(anchorX, anchorY);
     scale = Math.max(fitScale, Math.min(16, next));
     mapEntityLayer.setAnimationEnabled(scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD);
@@ -288,16 +362,14 @@ const modules = await activateModules('world_map');
       height = Math.max(1, Math.round(data.world.height * scale));
     $('stage').style.width = `${width}px`;
     $('stage').style.height = `${height}px`;
+    $('stage').classList.toggle('detail-zoom', chunkLayerRenderer.isDetailZoom());
     mapEntityLayer.refreshMarkerPositions();
-    const paths = $('paths');
-    paths.setAttribute('viewBox', `0 0 ${data.world.width} ${data.world.height}`);
-    paths.style.width = `${width}px`;
-    paths.style.height = `${height}px`;
     $('stage').classList.toggle('pixelated', scale >= 1);
     layoutVisibleChunks();
+    layoutFogCanvas();
     $('zoom-level').textContent = `${Math.round((scale / fitScale) * 100)}%`;
     if (worldPoint) placeWorldPoint(worldPoint.x, worldPoint.y, anchorX, anchorY);
-    requestVisibleChunkRender();
+    scheduleViewportLayerUpdate();
   };
   const worldFitScale = () => {
     if (!data) return;
@@ -325,17 +397,22 @@ const modules = await activateModules('world_map');
     if (!data) return;
     fitMode = 'explored';
     fitScale = worldFitScale();
-    const chunkSize = Number(data.chunk_size || 64),
-      chunks = (data.players || []).flatMap((player) => player.chunks || []);
-    if (!chunks.length) {
+    const chunkSize = Number(data.chunk_size || 64);
+    const positions = (data.players || []).flatMap((player) => [
+      ...(player.positions || []),
+      ...(player.position ? [player.position] : []),
+    ]);
+    if (!positions.length) {
       fitMap();
       return;
     }
-    const minX = Math.min(...chunks.map((chunk) => Number(chunk.x) * chunkSize)),
-      maxX = Math.max(...chunks.map((chunk) => (Number(chunk.x) + 1) * chunkSize));
-    const minY = Math.min(...chunks.map((chunk) => Number(chunk.y) * chunkSize)),
-      maxY = Math.max(...chunks.map((chunk) => (Number(chunk.y) + 1) * chunkSize));
-    const padding = Math.max(24, chunkSize / 2),
+    const playerX = (point) => Number(point.tileX ?? point.x);
+    const playerY = (point) => Number(point.tileY ?? point.y);
+    const minX = Math.min(...positions.map(playerX));
+    const maxX = Math.max(...positions.map(playerX));
+    const minY = Math.min(...positions.map(playerY));
+    const maxY = Math.max(...positions.map(playerY));
+    const padding = Math.max(96, chunkSize),
       width = maxX - minX + padding * 2,
       height = maxY - minY + padding * 2,
       view = $('viewport');
@@ -347,6 +424,15 @@ const modules = await activateModules('world_map');
     setScale(Math.max(fitScale, focusedScale));
     centerOn((minX + maxX) / 2, (minY + maxY) / 2);
     redrawVisiblePaths();
+  };
+  const resizeViewport = () => {
+    if (!data) return;
+    fitScale = worldFitScale();
+    const viewport = $('viewport');
+
+    // Safari changes the visual viewport as its browser bars move. Keep the map zoomed
+    // around the current center instead of snapping back to the fit or exploration view.
+    setScale(scale, viewport.clientWidth / 2, viewport.clientHeight / 2);
   };
   const redrawVisiblePaths = () => {
     if (!data) return;
@@ -495,6 +581,16 @@ const modules = await activateModules('world_map');
   const layoutVisibleChunks = () => {
     chunkLayerRenderer.layout();
   };
+  let viewportLayerFrame: number | null = null;
+  const scheduleViewportLayerUpdate = () => {
+    if (viewportLayerFrame !== null) return;
+    viewportLayerFrame = requestAnimationFrame(() => {
+      viewportLayerFrame = null;
+      drawOverview();
+      requestVisibleChunkRender();
+      scheduleVisibleLiveRefresh();
+    });
+  };
   const requestVisibleChunkRender = () => {
     chunkLayerRenderer.requestRender();
   };
@@ -503,7 +599,6 @@ const modules = await activateModules('world_map');
     if (canvasWorld !== worldKey) {
       chunkLayerRenderer.clear();
       playerPaths.clear();
-      overviewDirtyChunks.clear();
       maskPlayersKey = '';
       routeKey = '';
       markerKey = '';
@@ -516,9 +611,13 @@ const modules = await activateModules('world_map');
       maskCanvas = document.createElement('canvas');
       maskCanvas.width = Math.ceil(width * MASK_SCALE);
       maskCanvas.height = Math.ceil(height * MASK_SCALE);
+      if (fogCanvas.width !== maskCanvas.width || fogCanvas.height !== maskCanvas.height) {
+        fogCanvas.width = maskCanvas.width;
+        fogCanvas.height = maskCanvas.height;
+      }
+      fogCanvas.style.width = `${width * scale}px`;
+      fogCanvas.style.height = `${height * scale}px`;
       explorationMask = new MapExplorationMask(maskCanvas, MASK_SCALE);
-      maskVersion++;
-      overviewRenderer.resetWorld(width, height);
     }
     chunkSize = size;
     const previousOwners = chunkOwners,
@@ -553,31 +652,12 @@ const modules = await activateModules('world_map');
         owner.overlays.push(chunk.data);
         nextOwners.set(key, owner);
       }
-    let changed = false;
-    for (const key of new Set([...previousOwners.keys(), ...nextOwners.keys()])) {
-      const before = previousOwners.get(key),
-        after = nextOwners.get(key);
-      const same =
-        before === after ||
-        (before &&
-          after &&
-          before.base === after.base &&
-          before.updateRevision === after.updateRevision &&
-          before.overlays.length === after.overlays.length &&
-          before.overlays.every((value, index) => value === after.overlays[index]));
-      if (!same) {
-        overviewDirtyChunks.add(key);
-        changed = true;
-      }
-    }
     chunkOwners = nextOwners;
     mapRevision = Number(data.map_revision) || mapRevision;
-    if (changed) {
-      baseMapRevision++;
-    }
   };
   const applyMapTileUpdates = (batches) => {
     let changed = false;
+    const changedPoints: Array<{ x: number; y: number }> = [];
     for (const batch of batches) {
       for (const update of batch.updates || []) {
         const x = Number(update.x);
@@ -610,16 +690,13 @@ const modules = await activateModules('world_map');
         owner.pixelUpdates = pixelUpdates;
         owner.updateRevision = (owner.updateRevision || 0) + 1;
         chunkOwners.set(key, owner);
-        overviewDirtyChunks.add(key);
+        changedPoints.push({ x, y });
         changed = true;
       }
     }
 
     if (changed) {
-      baseMapRevision++;
-      void buildOverview();
-      requestVisibleChunkRender();
-      queueMapSnapshotSave();
+      chunkLayerRenderer.invalidateMapTiles(changedPoints);
     }
   };
   const renderLiveLayers = () => {
@@ -726,10 +803,9 @@ const modules = await activateModules('world_map');
     if (rebuildMask && explorationMask) {
       exploredPercent = explorationMask.rebuild(explored, explorationImages, surfaceY);
       maskPlayersKey = nextMaskPlayersKey;
+      updateFogCanvas();
     }
-    if (rebuildMask) maskVersion++;
     drawOverview();
-    void buildOverview();
     renderLiveLayers();
     const pylonKey = modules['world_map.pylons'] ? JSON.stringify(data.pylons || []) : 'off';
     if (pylonKey !== pylonRenderKey) {
@@ -748,14 +824,13 @@ const modules = await activateModules('world_map');
     renderToggles();
     updateMapImportOptions();
     const hasMap =
-      (data.base_chunks?.length || 0) > 0 ||
-      explored.some((player) => player.chunks?.length || player.exploration_url);
+      Number(data.map_version || data.map_revision || 0) > 0 ||
+      explored.some((player) => player.exploration_url || player.positions?.length);
     status(
       hasMap
         ? ''
         : 'Карта станет видна, когда появятся данные карты и обычных перемещений игроков.',
     );
-    queueMapSnapshotSave();
     requestVisibleChunkRender();
   };
   const refresh = async (initial) => {
@@ -765,6 +840,7 @@ const modules = await activateModules('world_map');
       const query = new URLSearchParams(location.search).get('world');
       const params = new URLSearchParams();
       if (query) params.set('world', query);
+      params.set('tiles', '1');
       if (data?.updated_at) params.set('since', String(data.updated_at));
       if (liveSince > 0) params.set('live_since', String(liveSince));
       const response = await fetchWithTimeout(
@@ -783,6 +859,8 @@ const modules = await activateModules('world_map');
         data &&
         String(data.world?.id) === String(next.world?.id) &&
         data.world?.name === next.world?.name;
+      const mapVersionChanged =
+        Boolean(data) && Number(data.map_version || 0) !== Number(next.map_version || 0);
       if (sameWorld) {
         const cached = new Map<string, any>(
           (data.base_chunks || []).map((chunk) => [`${chunk.x},${chunk.y}`, chunk]),
@@ -820,6 +898,8 @@ const modules = await activateModules('world_map');
       }
       const key = JSON.stringify([
         next.updated_at,
+        next.map_version,
+        next.map_revision,
         next.tile_info_updated_at,
         next.base_chunks?.length,
         next.scan?.scannedChunks,
@@ -838,18 +918,12 @@ const modules = await activateModules('world_map');
         ]),
       ]);
       if (!initial && key === renderKey) return;
-      const oldScale = scale,
-        oldLeft = $('viewport').scrollLeft,
-        oldTop = $('viewport').scrollTop;
+      const hadMapData = Boolean(data);
       data = next;
       renderDebugPanel?.setData(next);
       await render();
-      if (initial || !renderKey) focusMap();
-      else {
-        setScale(oldScale);
-        $('viewport').scrollLeft = oldLeft;
-        $('viewport').scrollTop = oldTop;
-      }
+      if (mapVersionChanged) chunkLayerRenderer.invalidateVisibleTiles();
+      if (!hadMapData || !sameWorld) focusMap();
       renderKey = key;
       renderScanStatus();
     } catch (error) {
@@ -860,37 +934,6 @@ const modules = await activateModules('world_map');
   };
   function renderScanStatus() {
     mapDiagnostics.render(data, exploredPercent, fullMapEnabled, debugWindowEnabled);
-  }
-  async function restoreCachedMap() {
-    try {
-      const cached = await readMapSnapshot();
-      if (!cached?.data || data) return;
-      const requested = new URLSearchParams(location.search).get('world');
-      if (
-        requested &&
-        ![String(cached.data.world?.id || ''), String(cached.data.world?.name || '')].includes(
-          requested,
-        )
-      )
-        return;
-      data = cached.data;
-      for (const player of cached.data.players || []) {
-        for (const point of player.positions || []) {
-          liveSince = Math.max(liveSince, Number(point.time) || 0);
-        }
-      }
-      renderDebugPanel?.setData(cached.data);
-      baseMapRevision = Number(cached.baseMapRevision || 0);
-      await render();
-      overviewRenderer.resetWorld(Number(data.world.width) || 1, Number(data.world.height) || 1);
-      if (cached.previewVersion === OVERVIEW_VERSION && (await restoreOverview(cached.preview))) {
-        drawOverview();
-      } else void buildOverview();
-      render();
-      focusMap();
-      renderScanStatus();
-      renderKey = '';
-    } catch {}
   }
   async function readImportedMapIdentity(file) {
     const bytes = new Uint8Array(await file.slice(0, 8192).arrayBuffer()),
@@ -944,6 +987,7 @@ const modules = await activateModules('world_map');
       if (requestedWorld) params.set('world', requestedWorld);
       if (liveSince > 0) params.set('since', String(liveSince));
       params.set('map_since', String(mapRevision));
+      appendLiveViewportParams(params);
       const requestStartedAt = performance.now();
       const response = await fetchWithTimeout(
         `/api/world-map/live${params.size ? `?${params}` : ''}`,
@@ -1032,8 +1076,10 @@ const modules = await activateModules('world_map');
       return;
     }
     applyMapTileUpdates(payload.map_tile_updates || []);
+    liveSince = Math.max(liveSince, Number(payload.position_cursor) || 0);
     mapRevision = Number(payload.map_revision) || mapRevision;
     data.map_revision = mapRevision;
+    if (payload.map_tile_updates?.length) data.map_version = Date.now();
 
     const playersById = new Map<string, any>(
       (data.players || []).map((player) => [player.id, player]),
@@ -1085,12 +1131,10 @@ const modules = await activateModules('world_map');
       direction: onlinePlayerIds.has(player.id) ? player.direction : null,
       session_seconds: onlinePlayerIds.has(player.id) ? player.session_seconds : null,
     }));
-    const deathsById = new Map<string, any>((data.deaths || []).map((death) => [death.id, death]));
     for (const death of payload.deaths || []) {
-      deathsById.set(death.id, death);
       liveSince = Math.max(liveSince, Number(death.timestamp) || 0);
     }
-    data.deaths = [...deathsById.values()];
+    data.deaths = payload.deaths || [];
     data.active_npcs = payload.active_npcs || [];
     data.coins = payload.coins || [];
     data.telemetry = payload.telemetry;
@@ -1110,6 +1154,7 @@ const modules = await activateModules('world_map');
     if (requestedWorld) params.set('world', requestedWorld);
     if (liveSince > 0) params.set('since', String(liveSince));
     params.set('map_since', String(mapRevision));
+    appendLiveViewportParams(params);
     const closeUp = scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD;
     const configuredInterval =
       Number(data?.telemetry?.configured_intervals?.browser_live_poll_interval_ms) || 50;
@@ -1119,6 +1164,7 @@ const modules = await activateModules('world_map');
       ? configuredInterval
       : Math.max(configuredInterval, overviewInterval);
     params.set('interval_ms', String(liveStreamIntervalMs));
+    liveSubscriptionKey = getLiveViewportKey();
     const stream = new EventSource(`/api/world-map/stream?${params}`);
     liveEventSource = stream;
     stream.onopen = () => {
@@ -1158,7 +1204,11 @@ const modules = await activateModules('world_map');
     const desiredInterval = closeUp
       ? configuredInterval
       : Math.max(configuredInterval, overviewInterval);
-    if (liveEventSource && desiredInterval !== liveStreamIntervalMs) {
+    const desiredViewportKey = getLiveViewportKey();
+    if (
+      liveEventSource &&
+      (desiredInterval !== liveStreamIntervalMs || desiredViewportKey !== liveSubscriptionKey)
+    ) {
       liveEventSource.close();
       liveEventSource = null;
       liveStreamConnected = false;
@@ -1202,11 +1252,7 @@ const modules = await activateModules('world_map');
       try {
         localStorage.setItem('terraria-world-map-show-full', String(fullMapEnabled));
       } catch {}
-      // Rebuild the explored mask when returning from full-map mode so every
-      // cached chunk is clipped again by the current player exploration paths.
-      maskPlayersKey = '';
-      chunkLayerRenderer.invalidateExplorationMask();
-      render();
+      updateFogCanvas();
     });
     $('map-debug-toggle').addEventListener('change', (event) => {
       debugWindowEnabled = event.currentTarget.checked;
@@ -1360,38 +1406,18 @@ const modules = await activateModules('world_map');
     hideTooltip: mapTooltip.hide,
     scheduleTooltip: mapTooltip.schedule,
     fitMap,
-    focusMap,
-    hasMapData: () => Boolean(data),
-    usesExploredFit: () => fitMode === 'explored',
-    renderVisibleChunks: requestVisibleChunkRender,
+    resizeViewport,
+    renderVisibleChunks: scheduleViewportLayerUpdate,
     downloadMapImage,
   });
   viewportController.bind();
-  if (debugMode) {
-    // The full bootstrap response contains thousands of compressed chunks.
-    // Restore the regular page's cached snapshot first so Safari can request
-    // only changes. A stale IndexedDB read must not block the debug page.
-    const restore = restoreCachedMap();
-    const cacheDeadline = new Promise((resolve) => setTimeout(resolve, 2500));
-    Promise.race([restore, cacheDeadline])
-      .then(() => refresh(true))
-      .then(() => refreshLive())
-      .then(() => {
-        connectLiveStream();
-        scheduleRefresh();
-        scheduleLiveRefresh();
-      });
-  } else {
-    restoreCachedMap().finally(() =>
-      refresh(true)
-        .then(() => refreshLive())
-        .then(() => {
-          connectLiveStream();
-          scheduleRefresh();
-          scheduleLiveRefresh();
-        }),
-    );
-  }
+  refresh(true)
+    .then(() => refreshLive())
+    .then(() => {
+      connectLiveStream();
+      scheduleRefresh();
+      scheduleLiveRefresh();
+    });
   window.addEventListener('terraria:view-change', (event) => {
     mapViewActive = (event as CustomEvent<{ view?: string }>).detail?.view === 'map';
     clearTimeout(pollTimer);

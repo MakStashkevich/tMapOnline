@@ -11,9 +11,7 @@ export type MapViewportBindings = {
   hideTooltip(): void;
   scheduleTooltip(event: PointerEvent): void;
   fitMap(): void;
-  focusMap(): void;
-  hasMapData(): boolean;
-  usesExploredFit(): boolean;
+  resizeViewport(): void;
   renderVisibleChunks(): void;
   downloadMapImage(): void;
 };
@@ -23,6 +21,7 @@ export class MapViewportController {
   private readonly pointers = new Map<number, PointerPosition>();
   private pinchStart: PinchStart | null = null;
   private dragStart: DragStart | null = null;
+  private resizeFrame: number | null = null;
 
   constructor(
     private readonly viewport: HTMLElement,
@@ -50,7 +49,8 @@ export class MapViewportController {
     this.viewport.addEventListener('scroll', this.bindings.renderVisibleChunks, {
       passive: true,
     });
-    window.addEventListener('resize', () => this.onResize());
+    window.addEventListener('resize', this.onResize);
+    window.visualViewport?.addEventListener('resize', this.onResize);
   }
 
   private zoomBy(multiplier: number): void {
@@ -170,9 +170,11 @@ export class MapViewportController {
     }
   }
 
-  private onResize(): void {
-    if (!this.bindings.hasMapData()) return;
-    if (this.bindings.usesExploredFit()) this.bindings.focusMap();
-    else this.bindings.fitMap();
-  }
+  private readonly onResize = (): void => {
+    if (this.resizeFrame !== null) return;
+    this.resizeFrame = requestAnimationFrame(() => {
+      this.resizeFrame = null;
+      this.bindings.resizeViewport();
+    });
+  };
 }

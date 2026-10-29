@@ -4,7 +4,7 @@ type SiteConfig = { modules?: Record<string, boolean> };
 
 const targets: Record<FeaturePage, FeatureMap> = {
   world_map: {
-    'world_map.exploration': ['#map-preview', '#chunk-layer'],
+    'world_map.exploration': ['#chunk-layer'],
     'world_map.routes': ['#paths'],
     'world_map.players': ['#players', '#markers'],
     'world_map.entities': ['#entities'],

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import urllib.parse
+import math
 
 from ..store_common import (
     Any,
@@ -21,6 +22,91 @@ from ..store_common import (
     time,
     zlib,
 )
+
+
+def _compact_positions(points: list[Any]) -> list[dict[str, Any]]:
+    """Reduce redundant straight-path samples without changing the visible route."""
+    normalized = [point for point in points if isinstance(point, dict)]
+    if len(normalized) < 3:
+        return [dict(point) for point in normalized]
+
+    kept_indices = {0, len(normalized) - 1}
+    anchors = [0]
+    anchors.extend(
+        index for index, point in enumerate(normalized[1:-1], 1)
+        if point.get("teleport") is True
+    )
+    anchors.append(len(normalized) - 1)
+    anchors = sorted(set(anchors))
+
+    for anchor_index in range(len(anchors) - 1):
+        start, end = anchors[anchor_index], anchors[anchor_index + 1]
+        pending = [(start, end)]
+        while pending:
+            segment_start, segment_end = pending.pop()
+            if segment_end - segment_start < 2:
+                continue
+            first, last = normalized[segment_start], normalized[segment_end]
+            try:
+                first_x, first_y = float(first["x"]), float(first["y"])
+                last_x, last_y = float(last["x"]), float(last["y"])
+                first_time = float(first.get("time", 0) or 0)
+                last_time = float(last.get("time", 0) or 0)
+            except (KeyError, TypeError, ValueError, OverflowError):
+                split = (segment_start + segment_end) // 2
+                kept_indices.add(split)
+                pending.extend(((segment_start, split), (split, segment_end)))
+                continue
+
+            distance = math.hypot(last_x - first_x, last_y - first_y)
+            if distance > 24 or last_time - first_time > 15:
+                split = (segment_start + segment_end) // 2
+                kept_indices.add(split)
+                pending.extend(((segment_start, split), (split, segment_end)))
+                continue
+
+            dx, dy = last_x - first_x, last_y - first_y
+            length_squared = dx * dx + dy * dy
+            greatest_error = 2.0
+            split_index = -1
+            for index in range(segment_start + 1, segment_end):
+                point = normalized[index]
+                try:
+                    x, y = float(point["x"]), float(point["y"])
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    split_index = index
+                    break
+                if length_squared == 0:
+                    error = math.hypot(x - first_x, y - first_y)
+                else:
+                    progress = max(0.0, min(1.0, ((x - first_x) * dx + (y - first_y) * dy) / length_squared))
+                    error = math.hypot(x - (first_x + progress * dx), y - (first_y + progress * dy))
+                if error > greatest_error:
+                    greatest_error = error
+                    split_index = index
+
+            if split_index >= 0:
+                kept_indices.add(split_index)
+                pending.extend(((segment_start, split_index), (split_index, segment_end)))
+
+    return [dict(normalized[index]) for index in sorted(kept_indices)]
+
+
+def _positions_after(points: list[Any], timestamp: float) -> list[dict[str, Any]]:
+    """Read only new movement samples from the append-only position history."""
+    result: list[dict[str, Any]] = []
+    for point in reversed(points):
+        if not isinstance(point, dict):
+            continue
+        try:
+            point_time = float(point.get("time", 0) or 0)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if point_time <= timestamp:
+            break
+        result.append(dict(point))
+    result.reverse()
+    return result
 
 
 class WorldMapMixin(StoreMixinContract):
@@ -75,7 +161,13 @@ class WorldMapMixin(StoreMixinContract):
                 },
             }
 
-    def world_map(self, world_id: str | None = None, since: float = 0, live_since: float = 0) -> dict[str, Any]:
+    def world_map(
+        self,
+        world_id: str | None = None,
+        since: float = 0,
+        live_since: float = 0,
+        include_chunks: bool = True,
+    ) -> dict[str, Any]:
         with self._lock:
             active_id = self._server_info.get("world_id")
             requested = str(world_id if world_id not in (None, "") else active_id or "")
@@ -108,7 +200,7 @@ class WorldMapMixin(StoreMixinContract):
                 selected_world = world_cache
                 if isinstance(world_cache.get("pylons"), list):
                     pylons = [item for item in world_cache["pylons"] if isinstance(item, dict)]
-                if isinstance(world_cache.get("base_map_chunks"), dict):
+                if include_chunks and isinstance(world_cache.get("base_map_chunks"), dict):
                     base_chunks_raw.update(world_cache["base_map_chunks"])
                 if isinstance(world_cache.get("base_map_chunk_times"), dict):
                     base_chunk_times.update(world_cache["base_map_chunk_times"])
@@ -146,7 +238,8 @@ class WorldMapMixin(StoreMixinContract):
                         continue
                     selected_world = selected_world or world
                     # Read earlier per-player caches for backward compatibility.
-                    base_chunks_raw.update(world.get("base_map_chunks", {}) if isinstance(world.get("base_map_chunks"), dict) else {})
+                    if include_chunks:
+                        base_chunks_raw.update(world.get("base_map_chunks", {}) if isinstance(world.get("base_map_chunks"), dict) else {})
                     base_chunk_times.update(world.get("base_map_chunk_times", {}) if isinstance(world.get("base_map_chunk_times"), dict) else {})
                     for stamp in world.get("base_map_chunk_times", {}).values() if isinstance(world.get("base_map_chunk_times"), dict) else ():
                         try:
@@ -161,14 +254,15 @@ class WorldMapMixin(StoreMixinContract):
                         tile_info_updated_at = max(tile_info_updated_at, float(world.get("tile_info_updated_at", 0)))
                     except (TypeError, ValueError):
                         pass
-                    raw_chunks = as_json_object(world.get("map_chunks"))
                     chunks = []
-                    for chunk_key, data in raw_chunks.items():
-                        try:
-                            chunk_x, chunk_y = (int(value) for value in str(chunk_key).split(",", 1))
-                        except (TypeError, ValueError):
-                            continue
-                        chunks.append({"x": chunk_x, "y": chunk_y, "data": data})
+                    if include_chunks:
+                        raw_chunks = as_json_object(world.get("map_chunks"))
+                        for chunk_key, data in raw_chunks.items():
+                            try:
+                                chunk_x, chunk_y = (int(value) for value in str(chunk_key).split(",", 1))
+                            except (TypeError, ValueError):
+                                continue
+                            chunks.append({"x": chunk_x, "y": chunk_y, "data": data})
                     exploration = world.get("map_exploration")
                     expected_exploration_filename = f"{stored_id}-{hashlib.sha256(player_id.encode('utf-8')).hexdigest()[:32]}.png"
                     has_imported_map = (
@@ -184,6 +278,11 @@ class WorldMapMixin(StoreMixinContract):
                     session_seconds = record.get("online_session_seconds")
                     if session_seconds is None and active_session is not None:
                         session_seconds = active_session.get("duration_seconds")
+                    raw_positions = world.get("positions", [])
+                    if live_since <= 0:
+                        positions = _compact_positions(raw_positions)
+                    else:
+                        positions = _positions_after(raw_positions, live_since)
                     players.append({
                         "id": player_id,
                         "name": record.get("name"),
@@ -195,12 +294,7 @@ class WorldMapMixin(StoreMixinContract):
                         "teleported": record.get("teleported", False) if is_online else False,
                         "session_seconds": session_seconds if is_online else None,
                         "position": record.get("position"),
-                        "positions": [
-                            dict(point)
-                            for point in world.get("positions", [])
-                            if isinstance(point, dict)
-                            and (live_since <= 0 or float(point.get("time", 0) or 0) > live_since)
-                        ],
+                        "positions": positions,
                         "chunks": chunks,
                         "has_imported_map": has_imported_map,
                         "can_export_map": (
@@ -250,6 +344,7 @@ class WorldMapMixin(StoreMixinContract):
                 "updated_at": map_updated_at,
                 "tile_info_updated_at": tile_info_updated_at,
                 "map_revision": map_revision,
+                "map_version": max(map_revision, int(map_updated_at * 1000)),
                 "telemetry": {
                     "snapshot_id": self._telemetry_snapshot_id,
                     "received_at": self._telemetry_received_at,
@@ -259,10 +354,109 @@ class WorldMapMixin(StoreMixinContract):
                 },
             }
 
+    def world_map_image_tile(
+        self, world_id: str | None, level: int, tile_x: int, tile_y: int
+    ) -> tuple[bytes, int] | None:
+        """Compose one visible pyramid tile without serializing the entire map."""
+        with self._lock:
+            active_id = str(self._server_info.get("world_id") or "")
+            active_name = str(self._server_info.get("world") or "")
+            requested = str(world_id or active_id)
+            matching_caches = [
+                cache
+                for cache in self._world_map_cache.values()
+                if requested in {
+                    str(cache.get("world_id") or ""),
+                    str(cache.get("world_name") or ""),
+                }
+            ]
+            matching_worlds: list[dict[str, Any]] = []
+            for player_id in self._players:
+                movement = self._load_movement(player_id)
+                for key, world in as_json_object(movement.get("worlds")).items():
+                    if requested in {str(key), str(world.get("world_id") or ""), str(world.get("world_name") or "")}:
+                        matching_worlds.append(world)
+
+            candidates: list[dict[str, Any]] = [*matching_caches, *matching_worlds]
+            if not candidates and requested not in {active_id, active_name}:
+                return None
+
+            selected = candidates[0] if candidates else {}
+            width = int(selected.get("width") or self._server_info.get("world_width") or 0)
+            height = int(selected.get("height") or self._server_info.get("world_height") or 0)
+            if width < 1 or height < 1:
+                return None
+            factor = 1 << max(0, min(level, 8))
+            world_left = tile_x * 256 * factor
+            world_top = tile_y * 256 * factor
+            if world_left >= width or world_top >= height:
+                return None
+            world_right = min(width, world_left + 256 * factor)
+            world_bottom = min(height, world_top + 256 * factor)
+            first_chunk_x = world_left // WORLD_MAP_CHUNK_SIZE
+            first_chunk_y = world_top // WORLD_MAP_CHUNK_SIZE
+            last_chunk_x = (world_right - 1) // WORLD_MAP_CHUNK_SIZE
+            last_chunk_y = (world_bottom - 1) // WORLD_MAP_CHUNK_SIZE
+
+            version = 0
+            chunks: list[tuple[int, int, str]] = []
+            tile_fingerprint = hashlib.blake2b(digest_size=8)
+            for world in candidates:
+                chunk_times = world.get("base_map_chunk_times")
+                if not isinstance(chunk_times, dict):
+                    chunk_times = {}
+                for field in ("base_map_chunks", "map_chunks"):
+                    raw_chunks = world.get(field)
+                    if not isinstance(raw_chunks, dict):
+                        continue
+                    for key, encoded in raw_chunks.items():
+                        if not isinstance(encoded, str):
+                            continue
+                        try:
+                            chunk_x, chunk_y = (int(value) for value in str(key).split(",", 1))
+                        except (TypeError, ValueError):
+                            continue
+                        if not (
+                            first_chunk_x <= chunk_x <= last_chunk_x
+                            and first_chunk_y <= chunk_y <= last_chunk_y
+                        ):
+                            continue
+                        try:
+                            version = max(
+                                version,
+                                int(
+                                    float(
+                                        chunk_times.get(key)
+                                        or world.get("map_updated_at", 0)
+                                        or 0
+                                    )
+                                    * 1000
+                                ),
+                            )
+                        except (TypeError, ValueError, OverflowError):
+                            pass
+                        chunks.append((chunk_x, chunk_y, encoded))
+                        tile_fingerprint.update(f"{chunk_x},{chunk_y}:".encode("ascii"))
+                        tile_fingerprint.update(encoded.encode("ascii"))
+
+            fingerprint = int.from_bytes(tile_fingerprint.digest(), "big")
+            cache_key = f"{requested}:{fingerprint}:{level}:{tile_x}:{tile_y}"
+
+        with self._map_tile_generation_lock:
+            image = self._map_tile_pyramid.render(
+                cache_key, width, height, level, tile_x, tile_y, chunks
+            )
+        return image, fingerprint
+
     def world_map_live(
-        self, world_id: str | None = None, since: float = 0, map_since: int = 0
+        self,
+        world_id: str | None = None,
+        since: float = 0,
+        map_since: int = 0,
+        bounds: tuple[float, float, float, float] | None = None,
+        include_coins: bool = True,
     ) -> dict[str, Any]:
-        """Return only live player/entity changes, never map chunks or full history."""
+        """Return live changes for the viewport without streaming off-screen detail."""
         with self._lock:
             active_id = self._server_info.get("world_id")
             active_name = str(self._server_info.get("world") or "")
@@ -273,6 +467,18 @@ class WorldMapMixin(StoreMixinContract):
             online_ids = set(self._online_player_ids) if same_world and age is not None and age <= 5 else set()
             players: list[dict[str, Any]] = []
             deaths: list[dict[str, Any]] = []
+            position_cursor = since
+
+            def is_visible(x_value: Any, y_value: Any) -> bool:
+                if bounds is None:
+                    return True
+                try:
+                    x, y = float(x_value), float(y_value)
+                except (TypeError, ValueError, OverflowError):
+                    return False
+                left, top, right, bottom = bounds
+                return left <= x <= right and top <= y <= bottom
+
             for player_id, record in self._players.items():
                 is_online = player_id in online_ids
                 movement = self._load_movement(player_id)
@@ -282,6 +488,7 @@ class WorldMapMixin(StoreMixinContract):
                     if requested and requested not in {str(key), str(stored_id or ""), name}:
                         continue
                     positions: list[dict[str, Any]] = []
+                    latest_time = since
                     # Movement samples are appended in timestamp order, so scan
                     # backward and stop as soon as the client's cursor is reached.
                     for point in reversed(world.get("positions", [])):
@@ -293,7 +500,10 @@ class WorldMapMixin(StoreMixinContract):
                             continue
                         if point_time <= since:
                             break
-                        positions.append(dict(point))
+                        latest_time = max(latest_time, point_time)
+                        position_cursor = max(position_cursor, point_time)
+                        if is_visible(point.get("x", point.get("tileX")), point.get("y", point.get("tileY"))):
+                            positions.append(dict(point))
                     positions.reverse()
                     if is_online or positions:
                         players.append({
@@ -308,11 +518,14 @@ class WorldMapMixin(StoreMixinContract):
                             "position": record.get("position") if is_online else None,
                             "velocity": record.get("velocity") if is_online else None,
                             "positions": positions,
+                            "position_cursor": latest_time,
                         })
                 for death in record.get("death_locations", []):
                     if not isinstance(death, dict):
                         continue
                     if requested and requested not in {str(death.get("world_id") or ""), str(death.get("world_name") or "")}:
+                        continue
+                    if not is_visible(death.get("x"), death.get("y")):
                         continue
                     deaths.append({
                         "id": f"{player_id}:{death.get('timestamp', 0)}",
@@ -343,8 +556,33 @@ class WorldMapMixin(StoreMixinContract):
             )
             map_delta_reset = map_since > 0 and map_since < oldest_revision - 1
             map_tile_updates = [] if map_delta_reset else [
-                item for item in map_changes
-                if isinstance(item, dict) and int(item.get("revision", 0) or 0) > map_since
+                {
+                    **item,
+                    "updates": [
+                        update
+                        for update in item.get("updates", [])
+                        if isinstance(update, dict)
+                        and is_visible(update.get("x"), update.get("y"))
+                    ],
+                }
+                for item in map_changes
+                if isinstance(item, dict)
+                and int(item.get("revision", 0) or 0) > map_since
+                and any(
+                    isinstance(update, dict)
+                    and is_visible(update.get("x"), update.get("y"))
+                    for update in item.get("updates", [])
+                )
+            ]
+            active_npcs = [
+                item.to_payload()
+                for item in self._active_npcs
+                if telemetry_is_fresh and is_visible(item.tile_x, item.tile_y)
+            ]
+            visible_coins = [
+                item.to_payload()
+                for item in self._active_coins
+                if include_coins and telemetry_is_fresh and is_visible(item.tile_x, item.tile_y)
             ]
             return {
                 "world": {"id": active_id, "name": active_name or None},
@@ -352,11 +590,12 @@ class WorldMapMixin(StoreMixinContract):
                 "online_player_ids": sorted(online_ids),
                 "players": players,
                 "deaths": deaths,
+                "position_cursor": position_cursor,
                 "map_tile_updates": map_tile_updates,
                 "map_revision": map_revision,
                 "map_delta_reset": map_delta_reset,
-                "active_npcs": [item.to_payload() for item in self._active_npcs] if telemetry_is_fresh else [],
-                "coins": [item.to_payload() for item in self._active_coins] if telemetry_is_fresh else [],
+                "active_npcs": active_npcs,
+                "coins": visible_coins,
                 "telemetry": {
                     "snapshot_id": self._telemetry_snapshot_id,
                     "received_at": received_at,

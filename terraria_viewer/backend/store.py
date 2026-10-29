@@ -9,6 +9,7 @@ from .services.movement import MovementMixin
 from .services.live_telemetry import LiveTelemetryMixin
 from .services.monitoring import MonitoringMixin
 from .services.world_map import WorldMapMixin
+from .services.map_tile_pyramid import MapTilePyramid
 from ..sprite_renderer import MapItemSpriteRenderer, NpcSpriteRenderer, PlayerSpriteRenderer
 
 
@@ -64,6 +65,8 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._world_map_cache: dict[str, dict[str, Any]] = {}
         self._world_map_cache_dirty = False
         self._world_map_cache_last_saved_at = time.monotonic()
+        self._map_tile_pyramid = MapTilePyramid()
+        self._map_tile_generation_lock = threading.BoundedSemaphore(2)
         self._boss_cache_dir = boss_cache_dir
         self.boss_cache_directory = boss_cache_dir
         self._boss_cache_lock = threading.Lock()
