@@ -2,7 +2,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 5;
+  z-index: 20;
 }
 .entity-marker {
   position: absolute;
@@ -33,7 +33,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 5;
+  z-index: 20;
 }
 .coin-marker {
   position: absolute;
@@ -49,7 +49,7 @@
 .death-layer {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: 20;
   pointer-events: none;
 }
 .death-marker {
