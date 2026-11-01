@@ -7,7 +7,7 @@ server:
   telemetry_port: 38762
 
 terraria:
-  game_dir: ~/Library/Application Support/Steam/steamapps/common/tModLoader
+  game_dir: /Volumes/T7/antmove/Users/makstashkevich/Library/Application Support/Steam/steamapps/common/tModLoader
   world: ~/Library/Application Support/Terraria/tModLoader/Worlds/calamity2.wld
   game_port: 7777
   max_players: 8
@@ -21,6 +21,7 @@ telemetry:
   entity_interval_ticks: 1
   map_capture_interval_ticks: 30
   map_tile_update_interval_ticks: 1
+  initial_world_scan_enabled: false
   world_scan_interval_ticks: 1
   browser_live_poll_interval_ms: 50
   browser_overview_poll_interval_ms: 250

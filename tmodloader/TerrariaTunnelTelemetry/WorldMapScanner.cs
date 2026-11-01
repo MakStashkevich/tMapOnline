@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Threading;
 using System.Linq;
 using System.Reflection;
 using Terraria;
@@ -20,10 +21,16 @@ internal sealed class WorldMapScanner
     private readonly Mod _mod;
     private readonly MapTileNameCatalog _tileNames;
     private readonly MapTileDataCapture _tileData;
+    private readonly bool _initialWorldScanEnabled;
     private readonly object _tileChangesLock = new();
+    private readonly object _deferredHardmodeLock = new();
     private readonly Queue<object> _pendingCaptures = new();
     private readonly Dictionary<Microsoft.Xna.Framework.Point, long> _pendingTileChanges = new();
     private readonly Dictionary<Microsoft.Xna.Framework.Point, long> _inFlightTileChanges = new();
+    private int[]? _deferredHardmodeTileBits;
+    private int _deferredHardmodeWorldId = -1;
+    private int _deferredHardmodeWorldWidth;
+    private int _deferredHardmodeWorldHeight;
     private long _firstInFlightSnapshotId;
     private long _lastInFlightSnapshotId;
     private long _nextTileChangeVersion;
@@ -39,11 +46,17 @@ internal sealed class WorldMapScanner
     private bool _loggedMapWorkaround;
     private bool _loggedTileChangeWarning;
 
-    public WorldMapScanner(Mod mod, MapTileNameCatalog tileNames, MapTileDataCapture tileData)
+    public WorldMapScanner(
+        Mod mod,
+        MapTileNameCatalog tileNames,
+        MapTileDataCapture tileData,
+        bool initialWorldScanEnabled
+    )
     {
         _mod = mod;
         _tileNames = tileNames;
         _tileData = tileData;
+        _initialWorldScanEnabled = initialWorldScanEnabled;
     }
 
     internal object[] DrainCaptures()
@@ -54,11 +67,67 @@ internal sealed class WorldMapScanner
         return captures.ToArray();
     }
 
+    internal void MarkConvertedTileChanged(int x, int y)
+    {
+        if (!IsInWorld(x, y))
+            return;
+
+        int[] bits;
+        int worldWidth;
+        lock (_deferredHardmodeLock)
+        {
+            EnsureDeferredHardmodeBuffer();
+            bits = _deferredHardmodeTileBits!;
+            worldWidth = _deferredHardmodeWorldWidth;
+        }
+
+        // A bitset records actual hardmode conversions without a large collection
+        // of per-tile objects. Keep the changes pending until a player visits them.
+        var tileIndex = (long)y * worldWidth + x;
+        var wordIndex = (int)(tileIndex / 32);
+        var mask = 1 << (int)(tileIndex % 32);
+        Interlocked.Or(ref bits[wordIndex], mask);
+    }
+
+    internal void RevealConvertedTilesInArea(int x, int y, int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            return;
+
+        int[]? bits;
+        int worldWidth;
+        int worldHeight;
+        lock (_deferredHardmodeLock)
+        {
+            if (_deferredHardmodeWorldId != Main.worldID)
+                return;
+
+            bits = _deferredHardmodeTileBits;
+            worldWidth = _deferredHardmodeWorldWidth;
+            worldHeight = _deferredHardmodeWorldHeight;
+        }
+        if (bits is null)
+            return;
+
+        var left = Math.Max(0, x);
+        var top = Math.Max(0, y);
+        var right = Math.Min(worldWidth, x + width);
+        var bottom = Math.Min(worldHeight, y + height);
+        for (var tileY = top; tileY < bottom; tileY++)
+            for (var tileX = left; tileX < right; tileX++)
+            {
+                var tileIndex = (long)tileY * worldWidth + tileX;
+                var wordIndex = (int)(tileIndex / 32);
+                var mask = 1 << (int)(tileIndex % 32);
+                var previousWord = Interlocked.And(ref bits[wordIndex], ~mask);
+                if ((previousWord & mask) != 0)
+                    MarkTileChanged(tileX, tileY);
+            }
+    }
+
     internal void MarkTileChanged(int x, int y)
     {
-        var worldWidth = Main.maxTilesX;
-        var worldHeight = Main.maxTilesY;
-        if (x < 0 || y < 0 || x >= worldWidth || y >= worldHeight)
+        if (!IsInWorld(x, y))
             return;
 
         // Liquid and world-generation hooks can arrive on different threads.
@@ -68,6 +137,60 @@ internal sealed class WorldMapScanner
             _pendingTileChanges[new Microsoft.Xna.Framework.Point(x, y)] = ++_nextTileChangeVersion;
         }
     }
+
+    internal void RevealNewlyVisibleTiles(
+        int x,
+        int y,
+        int width,
+        int height,
+        int previousX,
+        int previousY,
+        int previousWidth,
+        int previousHeight
+    )
+    {
+        if (width <= 0 || height <= 0)
+            return;
+
+        var left = Math.Max(0, x);
+        var top = Math.Max(0, y);
+        var right = Math.Min(Main.maxTilesX, x + width);
+        var bottom = Math.Min(Main.maxTilesY, y + height);
+        lock (_tileChangesLock)
+        {
+            for (var tileY = top; tileY < bottom; tileY++)
+                for (var tileX = left; tileX < right; tileX++)
+                {
+                    if (tileX >= previousX && tileX < previousX + previousWidth
+                        && tileY >= previousY && tileY < previousY + previousHeight)
+                        continue;
+
+                    // Newly visible tiles are sent through the same sparse delta
+                    // protocol as edits, avoiding a second map-capture pipeline.
+                    _pendingTileChanges[new Microsoft.Xna.Framework.Point(tileX, tileY)] = ++_nextTileChangeVersion;
+                }
+        }
+    }
+
+    private void EnsureDeferredHardmodeBuffer()
+    {
+        var worldWidth = Main.maxTilesX;
+        var worldHeight = Main.maxTilesY;
+        if (_deferredHardmodeWorldId == Main.worldID
+            && _deferredHardmodeWorldWidth == worldWidth
+            && _deferredHardmodeWorldHeight == worldHeight)
+            return;
+
+        var tileCount = checked((long)worldWidth * worldHeight);
+        var wordCount = checked((int)((tileCount + 31) / 32));
+        _deferredHardmodeTileBits = new int[wordCount];
+        _deferredHardmodeWorldId = Main.worldID;
+        _deferredHardmodeWorldWidth = worldWidth;
+        _deferredHardmodeWorldHeight = worldHeight;
+    }
+
+    private static bool IsInWorld(int x, int y) =>
+        x >= 0 && y >= 0 && x < Main.maxTilesX && y < Main.maxTilesY;
 
     internal bool HasPendingTileChanges
     {
@@ -228,15 +351,19 @@ internal sealed class WorldMapScanner
         var attempted = Math.Min(_nextChunk, total);
         return new
         {
-            enabled = true,
-            active = Main.netMode == NetmodeID.Server && total > 0 && attempted < total,
-            complete = total > 0 && attempted >= total,
+            enabled = _initialWorldScanEnabled,
+            active = _initialWorldScanEnabled
+                && Main.netMode == NetmodeID.Server
+                && total > 0
+                && attempted < total,
+            complete = _initialWorldScanEnabled && total > 0 && attempted >= total,
             scannedChunks = _scannedChunks,
             attemptedChunks = attempted,
             failedChunks = _failedChunks,
             failedTiles = _failedTiles,
             totalChunks = total,
-            remainingChunks = Math.Max(0, total - attempted),
+            remainingChunks = _initialWorldScanEnabled ? Math.Max(0, total - attempted) : 0,
+            skippedChunks = _initialWorldScanEnabled ? 0 : total,
             percent = total == 0 ? 0 : Math.Round(attempted * 100d / total, 1),
             worldId = Main.worldID,
             worldName = Main.worldName,
@@ -247,26 +374,11 @@ internal sealed class WorldMapScanner
 
     internal void CaptureNextChunk()
     {
+        PrepareWorld();
         if (Main.netMode != NetmodeID.Server || Main.maxTilesX <= 0 || Main.maxTilesY <= 0)
             return;
-        if (_worldId != Main.worldID)
-        {
-            _worldId = Main.worldID;
-            _nextChunk = 0;
-            _scannedChunks = 0;
-            _failedChunks = 0;
-            _failedTiles = 0;
-            _pendingCaptures.Clear();
-            lock (_tileChangesLock)
-            {
-                _pendingTileChanges.Clear();
-                _inFlightTileChanges.Clear();
-                _firstInFlightSnapshotId = 0;
-                _lastInFlightSnapshotId = 0;
-            }
-            _loggedScanStart = false;
-            _loggedWarning = false;
-        }
+        if (!_initialWorldScanEnabled)
+            return;
         const int chunkSize = ChunkSize;
         var columns = (Main.maxTilesX + chunkSize - 1) / chunkSize;
         var rows = (Main.maxTilesY + chunkSize - 1) / chunkSize;
@@ -300,37 +412,41 @@ internal sealed class WorldMapScanner
             var pixels = new byte[width * height * 4];
             var tileInfo = _tileData.Capture(x, y, width, height);
             for (var row = 0; row < height; row++)
-            for (var column = 0; column < width; column++)
-            {
-                var tileX = x + column;
-                var tileY = y + row;
-                Microsoft.Xna.Framework.Color color;
-                try
+                for (var column = 0; column < width; column++)
                 {
-                    var mapTile = MapHelper.CreateMapTile(tileX, tileY, byte.MaxValue);
-                    color = MapHelper.GetMapTileXnaColor(ref mapTile);
-                }
-                catch (IndexOutOfRangeException exception)
-                {
-                    _failedTiles++;
-                    if (!_loggedWarning)
+                    var tileX = x + column;
+                    var tileY = y + row;
+                    Microsoft.Xna.Framework.Color color;
+                    try
                     {
-                        _loggedWarning = true;
-                        var tile = Main.tile[tileX, tileY];
-                        _mod.Logger.Warn($"Could not render Terraria map tile ({tileX},{tileY}), type={tile.TileType}, wall={tile.WallType}; using black fallback: {exception}");
+                        var mapTile = MapHelper.CreateMapTile(tileX, tileY, byte.MaxValue);
+                        color = MapHelper.GetMapTileXnaColor(ref mapTile);
                     }
-                    color = Microsoft.Xna.Framework.Color.Black;
+                    catch (IndexOutOfRangeException exception)
+                    {
+                        _failedTiles++;
+                        if (!_loggedWarning)
+                        {
+                            _loggedWarning = true;
+                            var tile = Main.tile[tileX, tileY];
+                            _mod.Logger.Warn($"Could not render Terraria map tile ({tileX},{tileY}), type={tile.TileType}, wall={tile.WallType}; using black fallback: {exception}");
+                        }
+                        color = Microsoft.Xna.Framework.Color.Black;
+                    }
+                    var offset = (row * width + column) * 4;
+                    pixels[offset] = color.R; pixels[offset + 1] = color.G;
+                    pixels[offset + 2] = color.B; pixels[offset + 3] = 255;
                 }
-                var offset = (row * width + column) * 4;
-                pixels[offset] = color.R; pixels[offset + 1] = color.G;
-                pixels[offset + 2] = color.B; pixels[offset + 3] = 255;
-            }
             using var compressed = new MemoryStream();
             using (var zlib = new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true))
                 zlib.Write(pixels, 0, pixels.Length);
             _pendingCaptures.Enqueue(new
             {
-                x, y, width, height, encoding = "rgba-zlib-base64",
+                x,
+                y,
+                width,
+                height,
+                encoding = "rgba-zlib-base64",
                 data = Convert.ToBase64String(compressed.ToArray()),
                 tileInfo = tileInfo.Data,
                 tileNames = tileInfo.Names,
@@ -353,6 +469,28 @@ internal sealed class WorldMapScanner
             // CreateMapTile may inspect neighboring map pixels; restore Main.Map even when rendering fails.
             RestoreMap(originalMap);
         }
+    }
+
+    internal void PrepareWorld()
+    {
+        if (Main.maxTilesX <= 0 || Main.maxTilesY <= 0 || _worldId == Main.worldID)
+            return;
+
+        _worldId = Main.worldID;
+        _nextChunk = 0;
+        _scannedChunks = 0;
+        _failedChunks = 0;
+        _failedTiles = 0;
+        _pendingCaptures.Clear();
+        lock (_tileChangesLock)
+        {
+            _pendingTileChanges.Clear();
+            _inFlightTileChanges.Clear();
+            _firstInFlightSnapshotId = 0;
+            _lastInFlightSnapshotId = 0;
+        }
+        _loggedScanStart = false;
+        _loggedWarning = false;
     }
 
     internal void EnsurePalette()

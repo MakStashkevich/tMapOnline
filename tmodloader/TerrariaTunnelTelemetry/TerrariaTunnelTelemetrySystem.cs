@@ -19,6 +19,7 @@ using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
 using Terraria.Map;
 using Terraria.Localization;
+using MonoMod.RuntimeDetour;
 
 namespace TerrariaTunnelTelemetry;
 
@@ -43,8 +44,10 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private MapTileNameCatalog? _mapTileNames;
     private MapTileDataCapture? _mapTileData;
     private WorldEntitySnapshotBuilder? _worldEntities;
-    private PlayerMapCapture? _playerMapCapture;
+    private PlayerMapChangeRevealer? _playerMapChangeRevealer;
     private WorldMapScanner? _mapScanner;
+    private Hook? _tileConversionHook;
+    private Hook? _wallConversionHook;
     private bool _loggedFirstSnapshot;
     private bool _loggedUpdateHook;
     private readonly int _playerPositionIntervalTicks = ReadPositiveEnvironmentInteger(
@@ -55,12 +58,16 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         "TERRARIA_TELEMETRY_MAP_CAPTURE_INTERVAL_TICKS", 30);
     private readonly int _mapTileUpdateIntervalTicks = ReadPositiveEnvironmentInteger(
         "TERRARIA_TELEMETRY_MAP_TILE_UPDATE_INTERVAL_TICKS", 1);
+    private readonly bool _initialWorldScanEnabled = ReadBooleanEnvironmentVariable(
+        "TERRARIA_TELEMETRY_INITIAL_WORLD_SCAN_ENABLED", true);
     private readonly int _worldScanIntervalTicks = ReadPositiveEnvironmentInteger(
         "TERRARIA_TELEMETRY_WORLD_SCAN_INTERVAL_TICKS", 1);
     private readonly int _deathRetentionSeconds = ReadNonNegativeEnvironmentInteger(
         "TERRARIA_TELEMETRY_DEATH_RETENTION_SECONDS", 3600);
     private long _serverTickCount;
     private long _nextSnapshotId;
+
+    private delegate bool OrigBlockConversion(int i, int j, int conversionType);
 
     public override void Load()
     {
@@ -74,6 +81,22 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         On_WorldGen.KillTile += CaptureTileBreak;
         On_WorldGen.PlaceWall += CaptureWallPlacement;
         On_WorldGen.KillWall += CaptureWallBreak;
+        var conversionParameters = new[]
+        {
+            typeof(int), typeof(int), typeof(int)
+        };
+        var tileConvertMethod = typeof(TileLoader).GetMethod("Convert", conversionParameters)!;
+        var wallConvertMethod = typeof(WallLoader).GetMethod("Convert", conversionParameters)!;
+        var tileConversionHandler = GetType().GetMethod(
+            nameof(CaptureTileConversion),
+            BindingFlags.Instance | BindingFlags.NonPublic
+        )!;
+        var wallConversionHandler = GetType().GetMethod(
+            nameof(CaptureWallConversion),
+            BindingFlags.Instance | BindingFlags.NonPublic
+        )!;
+        _tileConversionHook = new Hook(tileConvertMethod, tileConversionHandler, this);
+        _wallConversionHook = new Hook(wallConvertMethod, wallConversionHandler, this);
         On_Liquid.NetSendLiquid += CaptureLiquidChange;
         On_Player.Teleport += CapturePlayerTeleport;
         On_Player.KillMe += CapturePlayerDeath;
@@ -81,9 +104,14 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         _telemetryStream = new TelemetryStreamServer(Mod);
         _mapTileNames = new MapTileNameCatalog(Mod);
         _mapTileData = new MapTileDataCapture(_mapTileNames);
-        _mapScanner = new WorldMapScanner(Mod, _mapTileNames, _mapTileData);
+        _mapScanner = new WorldMapScanner(
+            Mod,
+            _mapTileNames,
+            _mapTileData,
+            _initialWorldScanEnabled
+        );
         _worldEntities = new WorldEntitySnapshotBuilder(Mod);
-        _playerMapCapture = new PlayerMapCapture(Mod, _mapScanner, _mapTileData);
+        _playerMapChangeRevealer = new PlayerMapChangeRevealer(_mapScanner);
         _telemetryStream.Start(port);
     }
 
@@ -94,6 +122,10 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         On_WorldGen.KillTile -= CaptureTileBreak;
         On_WorldGen.PlaceWall -= CaptureWallPlacement;
         On_WorldGen.KillWall -= CaptureWallBreak;
+        _tileConversionHook?.Dispose();
+        _tileConversionHook = null;
+        _wallConversionHook?.Dispose();
+        _wallConversionHook = null;
         On_Liquid.NetSendLiquid -= CaptureLiquidChange;
         On_Player.Teleport -= CapturePlayerTeleport;
         On_Player.KillMe -= CapturePlayerDeath;
@@ -109,7 +141,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         _mapTileNames = null;
         _mapTileData = null;
         _worldEntities = null;
-        _playerMapCapture = null;
+        _playerMapChangeRevealer = null;
     }
 
     private void CapturePlayerTeleport(On_Player.orig_Teleport orig, Player self, Vector2 newPosition, int style, int extraInfo)
@@ -125,7 +157,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     {
         var placed = orig(i, j, type, mute, forced, player, style);
         if (placed)
-            _mapScanner?.MarkTileChanged(i, j);
+            RecordWorldTileChange(i, j);
         return placed;
     }
 
@@ -136,7 +168,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var existed = InWorld(i, j) && Main.tile[i, j].HasTile;
         orig(i, j, fail, effectOnly, noItem);
         if (existed && InWorld(i, j) && !Main.tile[i, j].HasTile)
-            _mapScanner?.MarkTileChanged(i, j);
+            RecordWorldTileChange(i, j);
     }
 
     private void CaptureWallPlacement(On_WorldGen.orig_PlaceWall orig, int i, int j, int type, bool mute)
@@ -144,7 +176,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var previousWall = InWorld(i, j) ? Main.tile[i, j].WallType : (ushort)0;
         orig(i, j, type, mute);
         if (InWorld(i, j) && Main.tile[i, j].WallType != previousWall)
-            _mapScanner?.MarkTileChanged(i, j);
+            RecordWorldTileChange(i, j);
     }
 
     private void CaptureWallBreak(On_WorldGen.orig_KillWall orig, int i, int j, bool fail)
@@ -152,7 +184,38 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var hadWall = InWorld(i, j) && Main.tile[i, j].WallType != WallID.None;
         orig(i, j, fail);
         if (hadWall && InWorld(i, j) && Main.tile[i, j].WallType == WallID.None)
-            _mapScanner?.MarkTileChanged(i, j);
+            RecordWorldTileChange(i, j);
+    }
+
+    private bool CaptureTileConversion(OrigBlockConversion orig, int i, int j, int conversionType)
+    {
+        var hadTile = InWorld(i, j) && Main.tile[i, j].HasTile;
+        var previousType = hadTile ? Main.tile[i, j].TileType : (ushort)0;
+        var converted = orig(i, j, conversionType);
+        var hasTile = InWorld(i, j) && Main.tile[i, j].HasTile;
+        var currentType = hasTile ? Main.tile[i, j].TileType : (ushort)0;
+        if (converted && Main.netMode == NetmodeID.Server
+            && (hadTile != hasTile || previousType != currentType))
+            RecordWorldTileChange(i, j);
+        return converted;
+    }
+
+    private bool CaptureWallConversion(OrigBlockConversion orig, int i, int j, int conversionType)
+    {
+        var previousWall = InWorld(i, j) ? Main.tile[i, j].WallType : (ushort)0;
+        var converted = orig(i, j, conversionType);
+        var currentWall = InWorld(i, j) ? Main.tile[i, j].WallType : (ushort)0;
+        if (converted && Main.netMode == NetmodeID.Server && previousWall != currentWall)
+            RecordWorldTileChange(i, j);
+        return converted;
+    }
+
+    private void RecordWorldTileChange(int x, int y)
+    {
+        if (WorldGen.IsGeneratingHardMode)
+            _mapScanner?.MarkConvertedTileChanged(x, y);
+        else
+            _mapScanner?.MarkTileChanged(x, y);
     }
 
     private void CaptureLiquidChange(On_Liquid.orig_NetSendLiquid orig, int x, int y)
@@ -178,14 +241,16 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var entityUpdateDue = _serverTickCount % _entityIntervalTicks == 0;
         var mapCaptureDue = _serverTickCount % _mapCaptureIntervalTicks == 0;
         var mapTileUpdateDue = _serverTickCount % _mapTileUpdateIntervalTicks == 0;
-        if (_serverTickCount % _worldScanIntervalTicks == 0)
+        if (_initialWorldScanEnabled && _serverTickCount % _worldScanIntervalTicks == 0)
             _mapScanner?.CaptureNextChunk();
+        else
+            _mapScanner?.PrepareWorld();
 
         // Advance expensive data categories independently, then publish one compact
         // combined snapshot whenever any category has fresh values.
         var mapChangesReady = mapTileUpdateDue && _mapScanner?.HasPendingTileChanges == true;
         if (playerPositionDue || entityUpdateDue || mapCaptureDue || mapChangesReady || _nextSnapshotId == 0)
-            UpdateSnapshotIfDue(playerPositionDue, entityUpdateDue, mapCaptureDue, mapTileUpdateDue, mapCaptureDue);
+            UpdateSnapshotIfDue(playerPositionDue, entityUpdateDue, mapCaptureDue, mapTileUpdateDue);
     }
 
     private void CapturePlayerDeath(On_Player.orig_KillMe orig, Player self,
@@ -230,15 +295,14 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         Mod.Logger.Info($"World loaded for telemetry (netMode={Main.netMode}, world='{Main.worldName}').");
         // World load can run on a worker thread. Let the game update hook reset
         // the scanner and its queue on the thread that owns them.
-        UpdateSnapshotIfDue(true, true, true, true, true);
+        UpdateSnapshotIfDue(true, true, true, true);
     }
 
     private void UpdateSnapshotIfDue(
         bool playerPositionDue,
         bool entityUpdateDue,
         bool mapCaptureDue,
-        bool mapTileUpdateDue,
-        bool includePlayerMapCaptures
+        bool mapTileUpdateDue
     )
     {
         if (!_loggedUpdateHook)
@@ -259,7 +323,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 UpdateCachedPlayers(updatePlayerPositions, mapCaptureDue, entityUpdateDue || initialPlayerSnapshot);
             if (entityUpdateDue || _nextSnapshotId == 0)
                 UpdateCachedEntities();
-            PublishSnapshot(includePlayerMapCaptures, mapTileUpdateDue);
+            PublishSnapshot(mapTileUpdateDue);
         }
         catch (Exception exception)
         {
@@ -309,17 +373,17 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 payload["velocity"] = new { x = player.velocity.X, y = player.velocity.Y };
                 if (updateAppearance || !payload.ContainsKey("appearance"))
                     payload["appearance"] = PlayerAppearanceSnapshotBuilder.Capture(player);
-                if (teleported)
-                    payload["mapCapture"] = null;
             }
 
-            if (updateMapCaptures)
+            if (updatePositions)
             {
                 var wasTeleported = payload.TryGetValue("teleported", out var value)
                     && value is true;
-                payload["mapCapture"] = wasTeleported
-                    ? null
-                    : _playerMapCapture!.Capture(player, pair.Value.Uuid ?? pair.Value.Name);
+                _playerMapChangeRevealer?.RevealPlayerView(
+                    player,
+                    pair.Value.Uuid ?? pair.Value.Name,
+                    wasTeleported
+                );
             }
         }
 
@@ -385,7 +449,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         }
     }
 
-    private void PublishSnapshot(bool includePlayerMapCaptures, bool includeBaseMapTileUpdates)
+    private void PublishSnapshot(bool includeBaseMapTileUpdates)
     {
         var snapshotId = ++_nextSnapshotId;
         foreach (var death in _pendingPlayerDeaths)
@@ -403,16 +467,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             .ToArray();
         var players = _cachedPlayers
             .OrderBy(pair => pair.Key)
-            .Select(pair =>
-            {
-                // Map windows change much less often than positions. Send them
-                // only on their capture tick instead of repeating the same
-                // potentially large pixel payload in every live snapshot.
-                var player = new System.Collections.Generic.Dictionary<string, object?>(pair.Value);
-                if (!includePlayerMapCaptures)
-                    player.Remove("mapCapture");
-                return (object)player;
-            })
+            .Select(pair => (object)new System.Collections.Generic.Dictionary<string, object?>(pair.Value))
             .ToArray();
 
         var mode = Main.GameMode;
@@ -577,6 +632,12 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     {
         var value = Environment.GetEnvironmentVariable(key);
         return int.TryParse(value, out var parsed) && parsed >= 0 ? parsed : fallback;
+    }
+
+    private static bool ReadBooleanEnvironmentVariable(string key, bool fallback)
+    {
+        var value = Environment.GetEnvironmentVariable(key);
+        return bool.TryParse(value, out var parsed) ? parsed : fallback;
     }
 
     private sealed record PlayerSession(string Name, string? Uuid, long JoinedAtUnix);

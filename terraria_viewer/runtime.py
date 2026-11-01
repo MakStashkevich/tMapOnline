@@ -120,6 +120,9 @@ def _start_game_process(
             "TERRARIA_TELEMETRY_MAP_TILE_UPDATE_INTERVAL_TICKS": str(
                 config["telemetry"]["map_tile_update_interval_ticks"]
             ),
+            "TERRARIA_TELEMETRY_INITIAL_WORLD_SCAN_ENABLED": str(
+                config["telemetry"]["initial_world_scan_enabled"]
+            ).lower(),
             "TERRARIA_TELEMETRY_WORLD_SCAN_INTERVAL_TICKS": str(
                 config["telemetry"]["world_scan_interval_ticks"]
             ),

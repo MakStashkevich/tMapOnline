@@ -27,6 +27,7 @@ telemetry:
   entity_interval_ticks: 6 # NPC, боссы, монеты и пилоны
   map_capture_interval_ticks: 30 # Цветные данные карты вокруг игроков
   map_tile_update_interval_ticks: 1 # Изменившиеся тайлы и стены, включая взрывы
+  initial_world_scan_enabled: true # Полный скан мира при старте Viewer
   world_scan_interval_ticks: 1 # Пауза между обработкой чанков сканера
   browser_live_poll_interval_ms: 50 # Частота лёгкого запроса живых данных
   browser_overview_poll_interval_ms: 250 # Частота live-обновлений при обзоре всей карты
@@ -49,6 +50,7 @@ telemetry:
 | `telemetry.player_position_interval_ticks`    | Частота позиций игроков в игровых тиках. Для локального сервера задан `1`.                                                             |
 | `telemetry.entity_interval_ticks`             | Частота NPC, боссов, монет и пилонов в игровых тиках. Для локального сервера задан `1`.                                                |
 | `telemetry.map_capture_interval_ticks`        | Частота захвата цветной карты вокруг игроков.                                                                                          |
+| `telemetry.initial_world_scan_enabled`        | Включает полный начальный скан мира. Выключите для проверки обновлений карты от передвижения игроков и изменений тайлов.                 |
 | `telemetry.world_scan_interval_ticks`         | Частота обработки чанков сканером мира.                                                                                                |
 | `telemetry.map_tile_update_interval_ticks`    | Частота отправки изменённых тайлов и стен. Хуки отслеживают разрушение, размещение и взрывы.                                           |
 | `telemetry.browser_live_poll_interval_ms`     | Интервал компактного запроса браузера. По умолчанию 50 мс для плавного движения маркеров.                                              |
