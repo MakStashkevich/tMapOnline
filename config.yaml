@@ -8,7 +8,9 @@ server:
 
 terraria:
   game_dir: /Volumes/T7/antmove/Users/makstashkevich/Library/Application Support/Steam/steamapps/common/tModLoader
-  world: ~/Library/Application Support/Terraria/tModLoader/Worlds/calamity2.wld
+  # Manual backup (2026-11-03): ~/Library/Application Support/Terraria/tModLoader/Worlds/Backups/manual-calamity2-144-20261103-1819/
+  # World file: calamity2-144.wld; tModLoader metadata: calamity2-144.twld
+  world: ~/Library/Application Support/Terraria/tModLoader/Worlds/calamity2-144.wld
   game_port: 7777
   max_players: 8
 

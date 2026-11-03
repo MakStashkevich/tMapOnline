@@ -57,21 +57,23 @@ def _make_store(config: dict[str, Any]) -> StatusStore:
 def _server_command(config: dict[str, Any]) -> tuple[list[str], Path]:
     game = config["terraria"]
     game_dir = _path(game["game_dir"])
-    launcher = game_dir / "start-tModLoaderServer.sh"
+    launcher = game_dir / "LaunchUtils" / "ScriptCaller.sh"
     world = _path(game["world"])
     if not launcher.is_file() or not os.access(launcher, os.X_OK):
-        raise FileNotFoundError(f"tModLoader server launcher is unavailable: {launcher}")
+        raise FileNotFoundError(f"tModLoader launch script is unavailable: {launcher}")
     if not world.is_file():
         raise FileNotFoundError(f"Terraria world file is unavailable: {world}")
     command = [
         str(launcher),
-        "-nosteam",
+        "-server",
         "-world",
         str(world),
         "-port",
         str(game["game_port"]),
         "-maxplayers",
         str(game["max_players"]),
+        "-config",
+        "serverconfig.txt",
     ]
     if sys.platform == "darwin" and platform.machine() in {"arm64", "x86_64"}:
         # The current tModLoader server bundle is x86_64 even when Viewer runs natively on Apple Silicon.
