@@ -61,12 +61,13 @@
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 1;
+  z-index: 9;
   display: block;
   image-rendering: pixelated;
   pointer-events: none;
 }
 #paths {
+  z-index: 10;
   overflow: hidden;
 }
 #paths path {

@@ -79,7 +79,7 @@ const modules = await activateModules('world_map');
   let debugWindowEnabled = false;
   let renderDebugWindowEnabled = false;
   try {
-    fullMapEnabled = localStorage.getItem('terraria-world-map-show-full') === 'true';
+    fullMapEnabled = debugMode && localStorage.getItem('terraria-world-map-show-full') === 'true';
   } catch {}
   try {
     debugWindowEnabled =
