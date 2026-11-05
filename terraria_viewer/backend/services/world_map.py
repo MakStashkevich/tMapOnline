@@ -337,6 +337,12 @@ class WorldMapMixin(StoreMixinContract):
                     "surface_y": selected_world.get("surface_y", self._server_info.get("world_surface")),
                     "spawn_x": selected_world.get("spawn_x"),
                     "spawn_y": selected_world.get("spawn_y"),
+                    "blood_moon": bool(
+                        requested in {str(active_id or ""), active_name}
+                        and telemetry_age is not None
+                        and telemetry_age <= 5
+                        and self._server_info.get("blood_moon") is True
+                    ),
                 },
                 "chunk_size": WORLD_MAP_CHUNK_SIZE,
                 "base_chunks": [
@@ -705,7 +711,13 @@ class WorldMapMixin(StoreMixinContract):
                 if include_coins and telemetry_is_fresh and is_visible(item.tile_x, item.tile_y)
             ]
             return {
-                "world": {"id": active_id, "name": active_name or None},
+                "world": {
+                    "id": active_id,
+                    "name": active_name or None,
+                    "blood_moon": bool(
+                        telemetry_is_fresh and self._server_info.get("blood_moon") is True
+                    ),
+                },
                 "updated_at": time.time(),
                 "online_player_ids": sorted(online_ids),
                 "players": players,

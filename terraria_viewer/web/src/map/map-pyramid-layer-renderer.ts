@@ -29,6 +29,7 @@ function isCanvasContextLost(context: CanvasRenderingContext2D): boolean {
 /** Fetches only map pyramid tiles intersecting the current viewport. */
 export class MapPyramidLayerRenderer {
   private readonly canvases = new Map<string, HTMLCanvasElement>();
+  private readonly pinnedOverviewKeys = new Set<string>();
   private readonly bitmapCache = new MapTileBitmapCache(MAX_CACHED_BITMAPS);
   private readonly invalidatedTiles = new Set<string>();
   private renderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -63,6 +64,7 @@ export class MapPyramidLayerRenderer {
     this.renderPending = false;
     for (const canvas of this.canvases.values()) canvas.remove();
     this.canvases.clear();
+    this.pinnedOverviewKeys.clear();
     this.invalidatedTiles.clear();
     this.bitmapCache.clear();
   }
@@ -177,6 +179,9 @@ export class MapPyramidLayerRenderer {
     const world = this.options.getWorld();
     if (!world) return;
 
+    await this.ensurePinnedOverview(world, version);
+    if (version !== this.renderVersion) return;
+
     const level = this.chooseLevel();
     const factor = 1 << level;
     const tileWorldSize = TILE_SIZE * factor;
@@ -213,7 +218,25 @@ export class MapPyramidLayerRenderer {
 
     // Load one coarser level first. It covers new view areas while sharp tiles arrive.
     if (level < MAX_LEVEL) {
-      const fallbackTiles = this.parentTilesFor(tiles, world.id, level + 1);
+      const fallbackLevel = level + 1;
+      const fallbackTileWorldSize = TILE_SIZE * (1 << fallbackLevel);
+      const viewportCenterX =
+        (visibleBounds.left + visibleBounds.right) / 2 / fallbackTileWorldSize;
+      const viewportCenterY =
+        (visibleBounds.top + visibleBounds.bottom) / 2 / fallbackTileWorldSize;
+      const fallbackTiles = this.parentTilesFor(tiles, world.id, fallbackLevel).sort(
+        (left, right) => {
+          const leftDistance = Math.hypot(
+            left.x + 0.5 - viewportCenterX,
+            left.y + 0.5 - viewportCenterY,
+          );
+          const rightDistance = Math.hypot(
+            right.x + 0.5 - viewportCenterX,
+            right.y + 0.5 - viewportCenterY,
+          );
+          return leftDistance - rightDistance;
+        },
+      );
       const fallback = await this.loadTileBitmaps(fallbackTiles, world, level + 1, version);
       if (version !== this.renderVersion) return;
 
@@ -283,6 +306,50 @@ export class MapPyramidLayerRenderer {
       parents.set(key, { x, y, key });
     }
     return [...parents.values()];
+  }
+
+  private async ensurePinnedOverview(world: WorldSize, version: number): Promise<void> {
+    const overviewTileWorldSize = TILE_SIZE * (1 << MAX_LEVEL);
+    const columns = Math.ceil(world.width / overviewTileWorldSize);
+    const rows = Math.ceil(world.height / overviewTileWorldSize);
+    const overviewTiles: MapTile[] = [];
+
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < columns; x += 1) {
+        const key = `${world.id}:${MAX_LEVEL}:${x}:${y}`;
+        overviewTiles.push({ x, y, key });
+        this.pinnedOverviewKeys.add(key);
+      }
+    }
+    const worldCenterX = world.width / 2 / overviewTileWorldSize;
+    const worldCenterY = world.height / 2 / overviewTileWorldSize;
+    overviewTiles.sort((left, right) => {
+      const leftDistance = Math.hypot(left.x + 0.5 - worldCenterX, left.y + 0.5 - worldCenterY);
+      const rightDistance = Math.hypot(right.x + 0.5 - worldCenterX, right.y + 0.5 - worldCenterY);
+      return leftDistance - rightDistance;
+    });
+
+    const missingTiles = overviewTiles.filter(
+      ({ key }) => !this.canvases.has(key) || this.invalidatedTiles.has(key),
+    );
+    if (missingTiles.length === 0) return;
+
+    const result = await this.loadTileBitmaps(missingTiles, world, MAX_LEVEL, version);
+    if (version !== this.renderVersion) return;
+
+    const canvases = this.createTileCanvases(
+      missingTiles,
+      result.bitmaps,
+      overviewTileWorldSize,
+      MAX_LEVEL,
+    );
+    if (!canvases) {
+      this.scheduleRetry();
+      return;
+    }
+
+    this.installTileCanvases(canvases);
+    if (result.failed) this.scheduleRetry();
   }
 
   private async loadTileBitmaps(
@@ -388,6 +455,7 @@ export class MapPyramidLayerRenderer {
     }
 
     for (const [parentKey, childKeys] of childrenByParent) {
+      if (this.pinnedOverviewKeys.has(parentKey)) continue;
       if (!childKeys.every((key) => this.canvases.has(key) && !this.invalidatedTiles.has(key)))
         continue;
       this.canvases.get(parentKey)?.remove();
@@ -410,6 +478,7 @@ export class MapPyramidLayerRenderer {
 
   private removeCanvasesOutside(requiredKeys: Set<string>): void {
     const retainedKeys = new Set([...requiredKeys].slice(0, MAX_ACTIVE_TILE_CANVASES));
+    for (const key of this.pinnedOverviewKeys) retainedKeys.add(key);
     for (const [key, canvas] of this.canvases) {
       if (retainedKeys.has(key)) continue;
       canvas.remove();

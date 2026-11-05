@@ -21,8 +21,15 @@
   cursor: grabbing;
 }
 .map-viewport.map-loaded {
-  background-color: #05090d;
-  background-image: none;
+  background-color: #132637;
+  background-image: url('https://terraria.fandom.com/wiki/Special:FilePath/Map_Background_Forest.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.map-viewport.map-loaded.blood-moon {
+  background-color: #351719;
+  background-image: url('https://terraria.fandom.com/wiki/Special:FilePath/Map_Background_Blood_Moon.png');
 }
 .map-stage {
   position: relative;

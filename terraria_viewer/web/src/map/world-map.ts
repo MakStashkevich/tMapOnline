@@ -179,6 +179,9 @@ const modules = await activateModules('world_map');
     $('status').textContent = message;
     $('status').hidden = !message;
   };
+  const updateMapBackground = () => {
+    $('viewport').classList.toggle('blood-moon', data?.world?.blood_moon === true);
+  };
   const fetchWithTimeout = async (url, options = {}, timeoutMs = 20000) => {
     const controller = new AbortController(),
       timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -299,7 +302,7 @@ const modules = await activateModules('world_map');
     if (!data) return;
     $('viewport').classList.add('map-loaded');
     const worldPoint = anchorX == null ? null : worldPointAt(anchorX, anchorY);
-    scale = Math.max(fitScale, Math.min(16, next));
+    scale = Math.max(fitScale * 0.68, Math.min(16, next));
     mapEntityLayer.setAnimationEnabled(scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD);
     updateLiveStreamCadence();
     const width = Math.max(1, Math.round(data.world.width * scale)),
@@ -317,13 +320,15 @@ const modules = await activateModules('world_map');
   const worldFitScale = () => {
     if (!data) return;
     const view = $('viewport');
+    const horizontalGutter = Math.max(40, Math.min(112, view.clientWidth * 0.08));
+    const verticalGutter = Math.max(40, Math.min(96, view.clientHeight * 0.08));
     return Math.max(
       0.01,
       Math.min(
-        (view.clientWidth - 24) / data.world.width,
-        (view.clientHeight - 24) / data.world.height,
+        (view.clientWidth - horizontalGutter * 2) / data.world.width,
+        (view.clientHeight - verticalGutter * 2) / data.world.height,
         1,
-      ),
+      ) * 0.9,
     );
   };
   const centerOn = (worldX, worldY) =>
@@ -867,6 +872,7 @@ const modules = await activateModules('world_map');
         });
       }
       const key = JSON.stringify([
+        next.world?.blood_moon,
         next.updated_at,
         next.map_version,
         next.map_revision,
@@ -903,6 +909,7 @@ const modules = await activateModules('world_map');
         chunkLayerRenderer.clear();
       }
       data = next;
+      updateMapBackground();
       let profile = null;
       if (explorationProfileChanged || !renderProfileId) {
         const routeIds = sameWorld ? [...activeRoutePlayerIds] : [];
@@ -1063,6 +1070,10 @@ const modules = await activateModules('world_map');
     requestMs: number | null,
   ): Promise<void> {
     if (!data || String(data.world?.id) !== String(payload.world?.id)) return;
+    if (typeof payload.world?.blood_moon === 'boolean') {
+      data.world.blood_moon = payload.world.blood_moon;
+      updateMapBackground();
+    }
     if (payload.map_delta_reset) {
       await refresh(false);
       mapRevision = Number(data?.map_revision) || 0;
