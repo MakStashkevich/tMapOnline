@@ -52,3 +52,5 @@ site:
     world_map.spawn: true
     world_map.tooltips: true
     world_map.debug: true
+
+# Latest pre-restart world backup (2026-11-04): ~/Library/Application Support/Terraria/tModLoader/Worlds/Backups/manual-calamity2-144-20261104-214235/

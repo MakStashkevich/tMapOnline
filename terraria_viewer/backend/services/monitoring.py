@@ -84,6 +84,7 @@ class MonitoringMixin(StoreMixinContract):
                     else:
                         record["direction"] = player.direction
                     record["teleported"] = player.teleported
+                    record["respawn_pending"] = player.respawn_pending
                     if player.session_seconds is not None:
                         record["online_session_seconds"] = max(0, player.session_seconds)
                     appearance = player.appearance

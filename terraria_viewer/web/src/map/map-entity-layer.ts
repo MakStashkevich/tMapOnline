@@ -26,6 +26,7 @@ type MapPlayerMarker = {
   session_seconds?: number | null;
   velocity?: { x?: number; y?: number } | null;
   teleported?: boolean;
+  respawn_pending?: boolean;
   position?: { tileX?: number; tileY?: number; x?: number; y?: number };
   positions?: Array<{ x: number; y: number; tileX?: number; tileY?: number }>;
 };
@@ -48,6 +49,7 @@ type MapCoinMarker = {
   stack: number;
   icon_url?: string;
 };
+type CoinMarkerState = { marker: HTMLDivElement; spriteUrl: string };
 type MapPylonMarker = { x: number; y: number; type?: string };
 type MapDeathMarker = { id: string; name?: string; x: number; y: number; timestamp?: number };
 
@@ -85,7 +87,7 @@ export class MapEntityLayer {
   private interpolationDelayMs = DEFAULT_INTERPOLATION_DELAY_MS;
   private world: MapEntityWorld = {};
   private spawnRenderKey = '';
-  private coinRenderVersion = 0;
+  private readonly coinMarkers = new Map<string, CoinMarkerState>();
   private deathRenderVersion = 0;
   private pylonRenderVersion = 0;
   private spawnRenderVersion = 0;
@@ -565,8 +567,7 @@ export class MapEntityLayer {
 
   drawDroppedCoins(coins: MapCoinMarker[]) {
     const layer = this.layer('coins');
-    layer.replaceChildren();
-    const renderVersion = ++this.coinRenderVersion;
+    const visibleCoinKeys = new Set<string>();
     for (const coin of coins || []) {
       const x = Number(coin.x),
         y = Number(coin.y),
@@ -582,31 +583,53 @@ export class MapEntityLayer {
         !this.isPointVisible(x, y)
       )
         continue;
-      void this.appendCoinMarker(layer, coin, x, y, stack, renderVersion);
+
+      const key = `${coin.id}:${coin.type}`;
+      visibleCoinKeys.add(key);
+      let state = this.coinMarkers.get(key);
+      if (!state) {
+        const marker = document.createElement('div');
+        marker.className = 'coin-marker';
+        state = { marker, spriteUrl: '' };
+        this.coinMarkers.set(key, state);
+        layer.append(marker);
+      }
+
+      const left = `${((x + 0.5) / this.world.width!) * 100}%`;
+      const top = `${((y + 0.5) / this.world.height!) * 100}%`;
+      if (state.marker.style.left !== left) state.marker.style.left = left;
+      if (state.marker.style.top !== top) state.marker.style.top = top;
+
+      const title = `${coin.name || 'Монета'} × ${stack.toLocaleString('ru-RU')}`;
+      if (state.marker.title !== title) state.marker.title = title;
+
+      const spriteUrl = coin.icon_url || '';
+      if (spriteUrl && state.spriteUrl !== spriteUrl) {
+        state.spriteUrl = spriteUrl;
+        void this.appendCoinSprite(key, state, spriteUrl);
+      }
+    }
+
+    for (const [key, state] of this.coinMarkers) {
+      if (visibleCoinKeys.has(key)) continue;
+      state.marker.remove();
+      this.coinMarkers.delete(key);
     }
   }
 
-  private async appendCoinMarker(
-    layer: HTMLElement,
-    coin: MapCoinMarker,
-    x: number,
-    y: number,
-    stack: number,
-    renderVersion: number,
+  private async appendCoinSprite(
+    key: string,
+    state: CoinMarkerState,
+    spriteUrl: string,
   ): Promise<void> {
-    const source = await loadSprite(coin.icon_url || '');
-    if (!source || renderVersion !== this.coinRenderVersion) return;
+    const source = await loadSprite(spriteUrl);
+    if (!source || this.coinMarkers.get(key) !== state || state.spriteUrl !== spriteUrl) return;
+
     const sprite = createOutlinedSprite(source, '#ffffff');
     if (!sprite) return;
 
-    const marker = document.createElement('div');
-    marker.className = 'coin-marker';
-    marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
-    marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
-    marker.title = `${coin.name || 'Монета'} × ${stack.toLocaleString('ru-RU')}`;
     sprite.className = 'coin-sprite';
-    marker.append(sprite);
-    layer.append(marker);
+    state.marker.replaceChildren(sprite);
   }
 
   drawDeaths(deaths: MapDeathMarker[]) {

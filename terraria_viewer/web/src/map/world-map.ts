@@ -309,6 +309,7 @@ const modules = await activateModules('world_map');
       const nextViewportKey = getLiveViewportKey();
       if (nextViewportKey === renderedViewportKey) return;
       renderedViewportKey = nextViewportKey;
+      if (new URLSearchParams(nextViewportKey).get('coins') !== '1') data.coins = [];
       markerKey = '';
       entityRenderKey = '';
       coinRenderKey = '';
@@ -716,7 +717,7 @@ const modules = await activateModules('world_map');
 
     mapEntityLayer.setWorld(data.world);
     const markerPlayers = modules['world_map.players']
-      ? players.filter((player) => player.online === true)
+      ? players.filter((player) => player.online === true && player.respawn_pending !== true)
       : [];
     const nextMarkerKey = JSON.stringify(
       markerPlayers.map((player) => [
@@ -859,6 +860,9 @@ const modules = await activateModules('world_map');
         data &&
         String(data.world?.id) === String(next.world?.id) &&
         data.world?.name === next.world?.name;
+      // The base map may include every dropped coin before viewport filtering.
+      // Keep only the last viewport-scoped snapshot from the live endpoint.
+      next.coins = sameWorld ? data.coins || [] : [];
       const mapVersionChanged =
         Boolean(data) && Number(data.map_version || 0) !== Number(next.map_version || 0);
       if (sameWorld) {

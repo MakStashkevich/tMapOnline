@@ -97,6 +97,7 @@ class PlayerSnapshot:
     session_seconds: float | None
     position: TilePosition | None
     teleported: bool
+    respawn_pending: bool
     map_capture: dict[str, Any] | None
     appearance: dict[str, Any] | None
     team: int | None
@@ -117,6 +118,7 @@ class PlayerSnapshot:
             session_seconds=_number(raw.get("sessionSeconds")),
             position=TilePosition.from_payload(raw.get("position")),
             teleported=raw.get("teleported") is True,
+            respawn_pending=raw.get("respawnPending") is True,
             map_capture=_optional_object(raw.get("mapCapture")),
             appearance=_optional_object(raw.get("appearance")),
             team=(
@@ -141,6 +143,7 @@ class PlayerSnapshot:
             "session_seconds": self.session_seconds,
             "position": self.position.to_payload() if self.position is not None else None,
             "teleported": self.teleported,
+            "respawn_pending": self.respawn_pending,
             "mapCapture": self.map_capture,
             "appearance": self.appearance,
             "team": self.team,

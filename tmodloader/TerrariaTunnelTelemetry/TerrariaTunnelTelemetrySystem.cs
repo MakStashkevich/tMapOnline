@@ -28,6 +28,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private static readonly JsonSerializerOptions JsonOptions = new();
     private readonly ConcurrentDictionary<int, string> _clientUuids = new();
     private readonly System.Collections.Generic.Dictionary<int, PlayerSession> _sessions = new();
+    private readonly System.Collections.Generic.Dictionary<int, (int TileX, int TileY)>
+        _pendingRespawnPositions = new();
     private readonly ConcurrentDictionary<int, byte> _teleportedSlots = new();
     private readonly System.Collections.Generic.List<PendingPlayerDeath> _pendingPlayerDeaths = new();
     private readonly System.Collections.Generic.Dictionary<int, System.Collections.Generic.Dictionary<string, object?>> _cachedPlayers = new();
@@ -134,6 +136,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         _telemetryStream = null;
         _clientUuids.Clear();
         _teleportedSlots.Clear();
+        _pendingRespawnPositions.Clear();
         _sessions.Clear();
         _pendingPlayerDeaths.Clear();
         _cachedPlayers.Clear();
@@ -260,6 +263,11 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         if (Main.netMode != NetmodeID.Server || !self.dead || self.whoAmI < 0 || self.whoAmI >= Main.maxPlayers)
             return;
 
+        _pendingRespawnPositions[self.whoAmI] = (
+            (int)Math.Floor(self.position.X / 16.0),
+            (int)Math.Floor(self.position.Y / 16.0)
+        );
+
         var name = self.name?.Trim();
         if (string.IsNullOrWhiteSpace(name) || name is "." or ".." or "...")
             return;
@@ -352,6 +360,18 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             {
                 var session = pair.Value;
                 var teleported = _teleportedSlots.TryRemove(slot, out _);
+                var tileX = (int)Math.Floor(player.position.X / 16.0);
+                var tileY = (int)Math.Floor(player.position.Y / 16.0);
+                var respawnPending = player.dead;
+                if (_pendingRespawnPositions.TryGetValue(slot, out var deathPosition))
+                {
+                    if (!player.dead &&
+                        (tileX != deathPosition.TileX || tileY != deathPosition.TileY))
+                        _pendingRespawnPositions.Remove(slot);
+                    else
+                        respawnPending = true;
+                }
+
                 payload["slot"] = slot;
                 payload["name"] = session.Name;
                 payload["uuid"] = session.Uuid;
@@ -363,10 +383,11 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 payload["team"] = (int)player.team;
                 payload["direction"] = player.direction;
                 payload["teleported"] = teleported;
+                payload["respawnPending"] = respawnPending;
                 payload["position"] = new
                 {
-                    tileX = (int)Math.Floor(player.position.X / 16.0),
-                    tileY = (int)Math.Floor(player.position.Y / 16.0),
+                    tileX,
+                    tileY,
                     x = player.position.X / 16.0,
                     y = player.position.Y / 16.0
                 };
@@ -446,6 +467,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             _sessions.Remove(slot);
             _clientUuids.TryRemove(slot, out _);
             _teleportedSlots.TryRemove(slot, out _);
+            _pendingRespawnPositions.Remove(slot);
         }
     }
 
