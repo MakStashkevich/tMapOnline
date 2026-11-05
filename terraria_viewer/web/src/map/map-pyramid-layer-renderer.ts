@@ -243,6 +243,7 @@ export class MapPyramidLayerRenderer {
       const fallbackCanvases = this.createTileCanvases(
         fallbackTiles,
         fallback.bitmaps,
+        world,
         TILE_SIZE * (1 << (level + 1)),
         level + 1,
       );
@@ -277,7 +278,7 @@ export class MapPyramidLayerRenderer {
       const result = await this.loadTileBitmaps(batch, world, level, version);
       if (version !== this.renderVersion) return;
 
-      const canvases = this.createTileCanvases(batch, result.bitmaps, tileWorldSize, level);
+      const canvases = this.createTileCanvases(batch, result.bitmaps, world, tileWorldSize, level);
       if (!canvases) {
         failedTiles = true;
       } else {
@@ -340,6 +341,7 @@ export class MapPyramidLayerRenderer {
     const canvases = this.createTileCanvases(
       missingTiles,
       result.bitmaps,
+      world,
       overviewTileWorldSize,
       MAX_LEVEL,
     );
@@ -390,6 +392,7 @@ export class MapPyramidLayerRenderer {
   private createTileCanvases(
     tiles: MapTile[],
     bitmaps: Map<string, ImageBitmap>,
+    world: WorldSize,
     tileWorldSize: number,
     level: number,
   ): Map<string, HTMLCanvasElement> | null {
@@ -409,12 +412,14 @@ export class MapPyramidLayerRenderer {
         context.drawImage(bitmap, 0, 0);
         if (isCanvasContextLost(context)) return null;
 
+        const worldLeft = tile.x * tileWorldSize;
+        const worldTop = tile.y * tileWorldSize;
         canvas.className = 'map-pyramid-tile';
-        canvas.dataset.worldLeft = String(tile.x * tileWorldSize);
-        canvas.dataset.worldTop = String(tile.y * tileWorldSize);
+        canvas.dataset.worldLeft = String(worldLeft);
+        canvas.dataset.worldTop = String(worldTop);
         canvas.dataset.tileAddress = tile.key;
-        canvas.dataset.worldWidth = String(canvas.width * (tileWorldSize / TILE_SIZE));
-        canvas.dataset.worldHeight = String(canvas.height * (tileWorldSize / TILE_SIZE));
+        canvas.dataset.worldWidth = String(Math.min(tileWorldSize, world.width - worldLeft));
+        canvas.dataset.worldHeight = String(Math.min(tileWorldSize, world.height - worldTop));
         canvas.style.zIndex = String(MAX_LEVEL - level);
         canvas.addEventListener('contextlost', (event) => {
           event.preventDefault();
