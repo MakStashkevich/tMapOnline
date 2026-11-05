@@ -51,10 +51,11 @@ const modules = await activateModules('world_map');
     '#b8d87a',
   ];
   const ANIMATED_MARKER_ZOOM_THRESHOLD = 15;
+  const MIN_FIT_SCALE_RATIO = 0.68;
   let data = null,
     scale = 1,
     fitScale = 1,
-    fitMode = 'explored',
+    fitMode: 'maximum' | 'world' | 'manual' = 'maximum',
     requestActive = false,
     renderKey = '';
   let exploredPercent = 0,
@@ -298,11 +299,12 @@ const modules = await activateModules('world_map');
     await mapImageExporter.download();
   };
   const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  const setScale = (next, anchorX = null, anchorY = null) => {
+  const setScale = (next, anchorX = null, anchorY = null, preserveFitMode = false) => {
     if (!data) return;
+    if (!preserveFitMode) fitMode = 'manual';
     $('viewport').classList.add('map-loaded');
     const worldPoint = anchorX == null ? null : worldPointAt(anchorX, anchorY);
-    scale = Math.max(fitScale * 0.68, Math.min(16, next));
+    scale = Math.max(fitScale * MIN_FIT_SCALE_RATIO, Math.min(16, next));
     mapEntityLayer.setAnimationEnabled(scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD);
     updateLiveStreamCadence();
     const width = Math.max(1, Math.round(data.world.width * scale)),
@@ -337,40 +339,16 @@ const modules = await activateModules('world_map');
     if (!data) return;
     fitMode = 'world';
     fitScale = worldFitScale();
-    setScale(fitScale);
+    setScale(fitScale, null, null, true);
     centerOn(data.world.width / 2, data.world.height / 2);
     if (data) redrawVisiblePaths();
   };
-  const focusMap = () => {
+  const openAtMaximumZoomOut = () => {
     if (!data) return;
-    fitMode = 'explored';
+    fitMode = 'maximum';
     fitScale = worldFitScale();
-    const chunkSize = Number(data.chunk_size || 64);
-    const positions = (data.players || []).flatMap((player) => [
-      ...(player.positions || []),
-      ...(player.position ? [player.position] : []),
-    ]);
-    if (!positions.length) {
-      fitMap();
-      return;
-    }
-    const playerX = (point) => Number(point.tileX ?? point.x);
-    const playerY = (point) => Number(point.tileY ?? point.y);
-    const minX = Math.min(...positions.map(playerX));
-    const maxX = Math.max(...positions.map(playerX));
-    const minY = Math.min(...positions.map(playerY));
-    const maxY = Math.max(...positions.map(playerY));
-    const padding = Math.max(96, chunkSize),
-      width = maxX - minX + padding * 2,
-      height = maxY - minY + padding * 2,
-      view = $('viewport');
-    const focusedScale = Math.min(
-      16,
-      (view.clientWidth - 48) / width,
-      (view.clientHeight - 48) / height,
-    );
-    setScale(Math.max(fitScale, focusedScale));
-    centerOn((minX + maxX) / 2, (minY + maxY) / 2);
+    setScale(fitScale * MIN_FIT_SCALE_RATIO, null, null, true);
+    centerOn(data.world.width / 2, data.world.height / 2);
     redrawVisiblePaths();
   };
   const resizeViewport = () => {
@@ -380,7 +358,13 @@ const modules = await activateModules('world_map');
 
     // Safari changes the visual viewport as its browser bars move. Keep the map zoomed
     // around the current center instead of snapping back to the fit or exploration view.
-    setScale(scale, viewport.clientWidth / 2, viewport.clientHeight / 2);
+    const nextScale =
+      fitMode === 'maximum'
+        ? fitScale * MIN_FIT_SCALE_RATIO
+        : fitMode === 'world'
+          ? fitScale
+          : scale;
+    setScale(nextScale, viewport.clientWidth / 2, viewport.clientHeight / 2, true);
   };
   const redrawVisiblePaths = () => {
     if (!data) return;
@@ -923,7 +907,7 @@ const modules = await activateModules('world_map');
           `${Number(data.world.width).toLocaleString('ru-RU')} × ${Number(data.world.height).toLocaleString('ru-RU')} тайлов — изучено ${Math.round(exploredPercent)}% карты`;
       }
       if (mapVersionChanged) chunkLayerRenderer.invalidateVisibleTiles();
-      if (!hadMapData || !sameWorld) focusMap();
+      if (!hadMapData || !sameWorld) openAtMaximumZoomOut();
       renderKey = key;
       renderScanStatus();
     } catch (error) {

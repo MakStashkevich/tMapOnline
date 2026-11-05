@@ -11,11 +11,11 @@
   -webkit-user-select: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  background-color: #0a1016;
-  background-image:
-    linear-gradient(#121c26 1px, transparent 1px),
-    linear-gradient(90deg, #121c26 1px, transparent 1px);
-  background-size: 32px 32px;
+  background-color: #000;
+  background-image: url('/assets/map-background-forest.webp');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   cursor: grab;
   &::-webkit-scrollbar {
     display: none;
@@ -26,15 +26,7 @@
 .map-viewport.dragging {
   cursor: grabbing;
 }
-.map-viewport.map-loaded {
-  background-color: #132637;
-  background-image: url('/assets/map-background-forest.webp');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-.map-viewport.map-loaded.blood-moon {
-  background-color: #351719;
+.map-viewport.blood-moon {
   background-image: url('/assets/map-background-blood-moon.webp');
 }
 .map-stage {
