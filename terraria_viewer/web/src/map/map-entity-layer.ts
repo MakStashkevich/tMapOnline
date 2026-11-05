@@ -87,6 +87,7 @@ export class MapEntityLayer {
   private interpolationDelayMs = DEFAULT_INTERPOLATION_DELAY_MS;
   private world: MapEntityWorld = {};
   private spawnRenderKey = '';
+  private entities: MapNpcMarker[] = [];
   private readonly coinMarkers = new Map<string, CoinMarkerState>();
   private deathRenderVersion = 0;
   private pylonRenderVersion = 0;
@@ -297,9 +298,10 @@ export class MapEntityLayer {
   }
 
   drawEntities(entities: MapNpcMarker[]) {
+    this.entities = entities || [];
     const layer = this.layer('entities');
     const activeIds = new Set<string>();
-    for (const entity of entities || []) {
+    for (const entity of this.entities) {
       const x = Number(entity.x),
         y = Number(entity.y);
       if (
@@ -338,6 +340,10 @@ export class MapEntityLayer {
       }
     }
     this.ensureAnimationFrame();
+  }
+
+  refreshVisibleEntities(): void {
+    this.drawEntities(this.entities);
   }
 
   private async appendEntityMarker(

@@ -703,7 +703,7 @@ class WorldMapMixin(StoreMixinContract):
             active_npcs = [
                 item.to_payload()
                 for item in self._active_npcs
-                if telemetry_is_fresh and is_visible(item.tile_x, item.tile_y)
+                if telemetry_is_fresh
             ]
             visible_coins = [
                 item.to_payload()

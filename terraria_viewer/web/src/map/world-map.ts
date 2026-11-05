@@ -626,6 +626,7 @@ const modules = await activateModules('world_map');
     viewportLayerFrame = requestAnimationFrame(() => {
       viewportLayerFrame = null;
       drawOverview();
+      mapEntityLayer.refreshVisibleEntities();
       requestVisibleChunkRender();
       scheduleVisibleLiveRefresh();
     });
