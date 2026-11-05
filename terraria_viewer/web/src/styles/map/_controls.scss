@@ -282,19 +282,31 @@
 .status[hidden] {
   display: none;
 }
+@font-face {
+  font-family: 'MapTerrariaLike';
+  src: url('/assets/fonts/neucha-regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
 #map-tooltip {
   position: fixed;
   z-index: 20;
-  max-width: min(300px, calc(100vw - 24px));
-  padding: 9px 12px;
-  color: var(--text);
-  background: #101820f2;
-  border: 1px solid #526a80;
-  border-radius: 9px;
-  box-shadow: 0 5px 22px #000b;
+  max-width: min(460px, calc(100vw - 36px));
+  padding: 0;
+  color: #fff;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   pointer-events: none;
-  font-size: 13px;
-  line-height: 1.4;
+  font-family: 'MapTerrariaLike', cursive;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.2;
+  text-shadow:
+    1px 1px 0 #000,
+    2px 2px 0 #000a;
 }
 #map-tooltip[hidden] {
   display: none;
@@ -302,9 +314,10 @@
 #map-tooltip strong,
 #map-tooltip span {
   display: block;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
 }
 #map-tooltip span {
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 12px;
+  margin-top: 2px;
 }

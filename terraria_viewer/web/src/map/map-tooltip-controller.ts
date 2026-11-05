@@ -28,6 +28,7 @@ export class MapTooltipController {
   private hoverTimer: ReturnType<typeof setTimeout> | null = null;
   private hoverKey = '';
   private hoverToken = 0;
+  private latestCursor: { clientX: number; clientY: number } | null = null;
 
   constructor(private readonly bindings: MapTooltipBindings) {}
 
@@ -36,6 +37,7 @@ export class MapTooltipController {
     this.hoverTimer = null;
     this.hoverKey = '';
     this.hoverToken++;
+    this.latestCursor = null;
     this.bindings.tooltip.hidden = true;
   };
 
@@ -53,16 +55,19 @@ export class MapTooltipController {
       return;
     }
 
+    const cursor = { clientX: event.clientX, clientY: event.clientY };
+    this.latestCursor = cursor;
     const object = this.objectAt(x + 0.5, y + 0.5, data, scale);
     const key = object?.key || `tile:${x},${y}`;
-    if (key === this.hoverKey) return;
+    if (key === this.hoverKey) {
+      if (!this.bindings.tooltip.hidden) this.positionAt(cursor);
+      return;
+    }
 
     if (this.hoverTimer) clearTimeout(this.hoverTimer);
     this.hoverKey = key;
     const token = ++this.hoverToken;
     this.bindings.tooltip.hidden = true;
-    const cursor = { clientX: event.clientX, clientY: event.clientY };
-
     // Wait for the cursor to settle before requesting block data over the network.
     this.hoverTimer = setTimeout(() => {
       void this.showAfterDelay(token, cursor, object, data, x, y);
@@ -284,9 +289,17 @@ export class MapTooltipController {
     descriptionElement.textContent = description;
     tooltip.hidden = false;
 
+    this.positionAt(this.latestCursor || cursor);
+  }
+
+  private positionAt(cursor: { clientX: number; clientY: number }): void {
+    const tooltip = this.bindings.tooltip;
     const bounds = tooltip.getBoundingClientRect();
-    const margin = 12;
-    tooltip.style.left = `${Math.max(margin, Math.min(innerWidth - bounds.width - margin, cursor.clientX + 14))}px`;
-    tooltip.style.top = `${Math.max(margin, Math.min(innerHeight - bounds.height - margin, cursor.clientY + 14))}px`;
+    const offset = 14;
+    const edge = 4;
+    const left = cursor.clientX + offset;
+    const top = cursor.clientY + offset;
+    tooltip.style.left = `${Math.max(0, left + bounds.width + edge > innerWidth ? innerWidth - bounds.width - edge : left)}px`;
+    tooltip.style.top = `${Math.max(0, top + bounds.height + edge > innerHeight ? innerHeight - bounds.height - edge : top)}px`;
   }
 }
