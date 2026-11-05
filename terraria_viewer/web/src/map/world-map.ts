@@ -315,6 +315,8 @@ const modules = await activateModules('world_map');
       height = Math.max(1, Math.round(data.world.height * scale));
     $('stage').style.width = `${width}px`;
     $('stage').style.height = `${height}px`;
+    $('stage').style.setProperty('--map-frame-width', `${200 * scale}px`);
+    $('stage').style.setProperty('--map-frame-overhang', `${20 * scale}px`);
     $('stage').classList.toggle('detail-zoom', chunkLayerRenderer.isDetailZoom());
     mapEntityLayer.refreshMarkerPositions();
     $('stage').classList.toggle('pixelated', scale >= 1);

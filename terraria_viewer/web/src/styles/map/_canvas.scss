@@ -34,7 +34,52 @@
   isolation: isolate;
   flex: 0 0 auto;
   margin: auto;
-  background: transparent;
+  background: #000;
+  --map-frame-width: 0px;
+  --map-frame-overhang: 0px;
+}
+// Use the same side-strip texture and 5x zoom sizing as Terraria's fullscreen map.
+.map-stage::before,
+.map-stage::after {
+  content: '';
+  position: absolute;
+  top: calc(-1 * var(--map-frame-overhang));
+  width: var(--map-frame-width);
+  height: calc(100% + 2 * var(--map-frame-overhang));
+  background-image: url('/assets/map-frame.png');
+  background-repeat: no-repeat;
+  background-size: calc(2 * var(--map-frame-width)) 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+.map-stage::before {
+  left: calc(-1 * var(--map-frame-width));
+  background-position: left center;
+}
+.map-stage::after {
+  right: calc(-1 * var(--map-frame-width));
+  background-position: right center;
+}
+#map-edge-bands {
+  position: absolute;
+  inset: calc(-1 * var(--map-frame-overhang)) 0;
+  pointer-events: none;
+  z-index: 3;
+}
+#map-edge-bands::before,
+#map-edge-bands::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--map-frame-overhang);
+  background: #000;
+}
+#map-edge-bands::before {
+  top: 0;
+}
+#map-edge-bands::after {
+  bottom: 0;
 }
 #chunk-layer {
   position: absolute;
