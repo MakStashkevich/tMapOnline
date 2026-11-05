@@ -25,6 +25,12 @@ type TileCacheMetrics = {
   evictions?: number;
   renders?: number;
   last_render_ms?: number;
+  disk_entries?: number;
+  disk_bytes?: number;
+  disk_byte_limit?: number;
+  disk_hits?: number;
+  disk_misses?: number;
+  disk_evictions?: number;
 };
 
 type DebugChunk = { data?: string | null };
@@ -221,6 +227,8 @@ export class MapRenderDebugPanel {
         ${row('Попадания и промахи', `${tileCache?.hits || 0} и ${tileCache?.misses || 0}`)}
         ${row('Повторные построения', `${tileCache?.renders || 0}, вытеснено ${tileCache?.evictions || 0}`)}
         ${row('Последний рендер тайла', `${(tileCache?.last_render_ms || 0).toFixed(1)} мс`)}
+        ${row('Дисковый PNG-кэш', `${this.formatBytes(tileCache?.disk_bytes || 0)} из ${this.formatBytes(tileCache?.disk_byte_limit || 0)}, ${tileCache?.disk_entries || 0} тайлов`)}
+        ${row('Диск: попадания / промахи', `${tileCache?.disk_hits || 0} / ${tileCache?.disk_misses || 0}, вытеснено ${tileCache?.disk_evictions || 0}`)}
       </div>`,
     );
 

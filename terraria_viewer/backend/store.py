@@ -65,7 +65,9 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._world_map_cache: dict[str, dict[str, Any]] = {}
         self._world_map_cache_dirty = False
         self._world_map_cache_last_saved_at = time.monotonic()
-        self._map_tile_pyramid = MapTilePyramid()
+        self._map_tile_pyramid = MapTilePyramid(
+            disk_cache_directory=movements_dir.parent / "map-tile-pyramid"
+        )
         self._map_tile_generation_lock = threading.BoundedSemaphore(2)
         self._boss_cache_dir = boss_cache_dir
         self.boss_cache_directory = boss_cache_dir

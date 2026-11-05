@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import os
+import tempfile
 import time
 import zlib
 from collections import OrderedDict
 from io import BytesIO
+from pathlib import Path
 from threading import Lock
 from typing import Any, Iterable, cast
 
@@ -18,18 +22,49 @@ class MapTilePyramid:
 
     TILE_SIZE = 256
     CHUNK_SIZE = 64
+    CACHE_FORMAT_VERSION = 1
 
-    def __init__(self, cache_limit: int = 128, cache_byte_limit: int = 32 * 1024 * 1024) -> None:
+    def __init__(
+        self,
+        cache_limit: int = 128,
+        cache_byte_limit: int = 32 * 1024 * 1024,
+        disk_cache_directory: Path | None = None,
+        disk_cache_byte_limit: int = 512 * 1024 * 1024,
+    ) -> None:
         self._cache_limit = cache_limit
         self._cache_byte_limit = cache_byte_limit
+        self._disk_cache_directory = disk_cache_directory
+        self._disk_cache_byte_limit = disk_cache_byte_limit
         self._cache: OrderedDict[str, bytes] = OrderedDict()
         self._cache_bytes = 0
+        self._disk_cache_bytes = 0
+        self._disk_cache_entries = 0
         self._cache_hits = 0
         self._cache_misses = 0
         self._cache_evictions = 0
+        self._disk_cache_hits = 0
+        self._disk_cache_misses = 0
+        self._disk_cache_evictions = 0
         self._render_count = 0
         self._last_render_ms = 0.0
         self._lock = Lock()
+        self._disk_lock = Lock()
+        if self._disk_cache_directory is not None:
+            self._initialize_disk_cache()
+
+    def _initialize_disk_cache(self) -> None:
+        directory = self._disk_cache_directory
+        if directory is None:
+            return
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        entries = list(directory.glob("*.png"))
+        self._disk_cache_entries = len(entries)
+        for path in entries:
+            try:
+                self._disk_cache_bytes += path.stat().st_size
+            except OSError:
+                continue
+        self._evict_disk_cache_if_needed()
 
     def get_metrics(self) -> dict[str, int | float]:
         """Return bounded-cache and last-render metrics for the debug view."""
@@ -43,7 +78,107 @@ class MapTilePyramid:
                 "evictions": self._cache_evictions,
                 "renders": self._render_count,
                 "last_render_ms": round(self._last_render_ms, 2),
+                "disk_entries": self._disk_cache_entries,
+                "disk_bytes": self._disk_cache_bytes,
+                "disk_byte_limit": self._disk_cache_byte_limit,
+                "disk_hits": self._disk_cache_hits,
+                "disk_misses": self._disk_cache_misses,
+                "disk_evictions": self._disk_cache_evictions,
             }
+
+    def _disk_path(self, cache_key: str) -> Path | None:
+        if self._disk_cache_directory is None:
+            return None
+        versioned_key = f"{self.CACHE_FORMAT_VERSION}:{cache_key}"
+        filename = hashlib.blake2b(versioned_key.encode("utf-8"), digest_size=20).hexdigest()
+        return self._disk_cache_directory / f"{filename}.png"
+
+    def _read_disk_cache(self, cache_key: str) -> bytes | None:
+        path = self._disk_path(cache_key)
+        if path is None:
+            return None
+        with self._disk_lock:
+            try:
+                tile = path.read_bytes()
+            except FileNotFoundError:
+                with self._lock:
+                    self._disk_cache_misses += 1
+                return None
+            except OSError:
+                with self._lock:
+                    self._disk_cache_misses += 1
+                return None
+            if not tile.startswith(b"\x89PNG\r\n\x1a\n"):
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                with self._lock:
+                    self._disk_cache_entries = max(0, self._disk_cache_entries - 1)
+                    self._disk_cache_bytes = max(0, self._disk_cache_bytes - len(tile))
+                    self._disk_cache_misses += 1
+                return None
+            try:
+                os.utime(path, None)
+            except OSError:
+                pass
+        with self._lock:
+            self._disk_cache_hits += 1
+        return tile
+
+    def _write_disk_cache(self, cache_key: str, tile: bytes) -> None:
+        path = self._disk_path(cache_key)
+        if path is None or len(tile) > self._disk_cache_byte_limit:
+            return
+        with self._disk_lock:
+            try:
+                previous_size = path.stat().st_size
+            except OSError:
+                previous_size = 0
+            temporary_path: Path | None = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="wb", dir=path.parent, prefix=".map-tile-", suffix=".tmp", delete=False
+                ) as temporary:
+                    temporary.write(tile)
+                    temporary_path = Path(temporary.name)
+                os.replace(temporary_path, path)
+            except OSError:
+                if temporary_path is not None:
+                    try:
+                        temporary_path.unlink()
+                    except OSError:
+                        pass
+                return
+
+            with self._lock:
+                if previous_size == 0:
+                    self._disk_cache_entries += 1
+                self._disk_cache_bytes += len(tile) - previous_size
+            self._evict_disk_cache_if_needed()
+
+    def _evict_disk_cache_if_needed(self) -> None:
+        if self._disk_cache_bytes <= self._disk_cache_byte_limit or self._disk_cache_directory is None:
+            return
+        entries: list[tuple[float, Path, int]] = []
+        for path in self._disk_cache_directory.glob("*.png"):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            entries.append((float(stat.st_mtime), path, int(stat.st_size)))
+        entries.sort(key=lambda item: item[0])
+        for _, path, size in entries:
+            if self._disk_cache_bytes <= self._disk_cache_byte_limit:
+                break
+            try:
+                path.unlink()
+            except OSError:
+                continue
+            with self._lock:
+                self._disk_cache_entries = max(0, self._disk_cache_entries - 1)
+                self._disk_cache_bytes = max(0, self._disk_cache_bytes - size)
+                self._disk_cache_evictions += 1
 
     def render(
         self,
@@ -63,6 +198,20 @@ class MapTilePyramid:
                 self._cache.move_to_end(cache_key)
                 return cached
             self._cache_misses += 1
+
+        cached = self._read_disk_cache(cache_key)
+        if cached is not None:
+            with self._lock:
+                previous = self._cache.pop(cache_key, None)
+                if previous is not None:
+                    self._cache_bytes -= len(previous)
+                self._cache[cache_key] = cached
+                self._cache_bytes += len(cached)
+                while len(self._cache) > self._cache_limit or self._cache_bytes > self._cache_byte_limit:
+                    _, evicted = self._cache.popitem(last=False)
+                    self._cache_bytes -= len(evicted)
+                    self._cache_evictions += 1
+            return cached
 
         started_at = time.perf_counter()
 
@@ -168,4 +317,5 @@ class MapTilePyramid:
                     _, evicted = self._cache.popitem(last=False)
                     self._cache_bytes -= len(evicted)
                     self._cache_evictions += 1
+        self._write_disk_cache(cache_key, tile)
         return tile
