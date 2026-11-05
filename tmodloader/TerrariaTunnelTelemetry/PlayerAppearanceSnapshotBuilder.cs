@@ -66,12 +66,14 @@ internal static class PlayerAppearanceSnapshotBuilder
         var assetDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "TerrariaTunnel", "mod-textures");
-        var equipTypes = new[]
-        {
-            EquipType.Head, EquipType.Body, EquipType.Legs, EquipType.Face, EquipType.Beard,
-            EquipType.Back, EquipType.Front, EquipType.Wings, EquipType.Shoes, EquipType.Waist,
-            EquipType.Neck, EquipType.HandsOn, EquipType.HandsOff, EquipType.Shield, EquipType.Balloon
-        };
+        var visibleSlots = new Dictionary<string, (EquipType Type, int Slot)>(StringComparer.Ordinal);
+        AddVisibleSlot(visibleSlots, "Head", EquipType.Head, ReadPlayerInt(player, "head"));
+        AddVisibleSlot(visibleSlots, "Body", EquipType.Body, ReadPlayerInt(player, "body"));
+        AddVisibleSlot(visibleSlots, "Legs", EquipType.Legs, ReadPlayerInt(player, "legs"));
+        AddVisibleSlot(visibleSlots, "Face", EquipType.Face, ReadPlayerInt(player, "face"));
+        AddVisibleSlot(visibleSlots, "FaceHead", EquipType.Face, ReadPlayerInt(player, "faceHead"));
+        AddVisibleSlot(visibleSlots, "FaceFlower", EquipType.Face, ReadPlayerInt(player, "faceFlower"));
+        AddVisibleSlot(visibleSlots, "Beard", EquipType.Beard, ReadPlayerInt(player, "beard"));
 
         foreach (var item in EnumerateEquippedItems(player))
         {
@@ -86,12 +88,16 @@ internal static class PlayerAppearanceSnapshotBuilder
             ExportDeclaredTransformationTextures(modItem, result, assetDirectory);
             ExportKnownCalamityTransformationTextures(modItem, result, assetDirectory);
 
-            foreach (var equipType in equipTypes)
+            foreach (var (layerName, visibleSlot) in visibleSlots)
             {
+                var equipType = visibleSlot.Type;
                 try
                 {
                     var slot = EquipLoader.GetEquipSlot(modItem.Mod, modItem.Name, equipType);
-                    if (slot < 0)
+                    // Only export equipment which Terraria resolved as visible.
+                    // Accessories in hidden vanity slots must not be composited
+                    // over the player's head just because they have a Face texture.
+                    if (slot < 0 || slot != visibleSlot.Slot)
                         continue;
                     var equipTexture = EquipLoader.GetEquipTexture(equipType, slot);
                     if (equipTexture == null || string.IsNullOrWhiteSpace(equipTexture.Texture))
@@ -115,7 +121,7 @@ internal static class PlayerAppearanceSnapshotBuilder
                     });
 
                     if (!string.IsNullOrEmpty(exportedPath))
-                        result[equipType.ToString()] = exportedPath;
+                        result[layerName] = exportedPath;
                 }
                 catch (Exception)
                 {
@@ -125,6 +131,16 @@ internal static class PlayerAppearanceSnapshotBuilder
         }
 
         return result;
+    }
+
+    private static void AddVisibleSlot(
+        IDictionary<string, (EquipType Type, int Slot)> slots,
+        string layerName,
+        EquipType equipType,
+        int? slot)
+    {
+        if (slot is > 0)
+            slots[layerName] = (equipType, slot.Value);
     }
 
     private static void ExportKnownCalamityTransformationTextures(
@@ -351,16 +367,12 @@ internal static class PlayerAppearanceSnapshotBuilder
         if (ReadPlayerMember(player, "armor") is not IEnumerable items)
             return null;
 
-        foreach (var item in items.Cast<object?>())
-        {
-            if (item == null || ReadPlayerInt(item, "stack") is not > 0)
-                continue;
-            var headSlot = ReadPlayerInt(item, "headSlot");
-            if (headSlot is >= 0)
-                return headSlot;
-        }
-
-        return null;
+        // Terraria's functional head slot is armor[0]. Vanity armor[10]
+        // controls Player.head separately and is already captured above.
+        var headItem = items.Cast<object?>().FirstOrDefault();
+        return headItem != null && ReadPlayerInt(headItem, "stack") is > 0
+            ? ReadPlayerInt(headItem, "headSlot")
+            : null;
     }
 
     private static Dictionary<string, bool> ReadHairSettings(Player player)

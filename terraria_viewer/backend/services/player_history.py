@@ -208,12 +208,28 @@ class PlayerHistoryMixin(StoreMixinContract):
         mod_equip_textures = appearance.get("modEquipTextures") if isinstance(appearance.get("modEquipTextures"), dict) else {}
         # Transformation accessories (for example Calamity's Ha-pu Fruit)
         # visually replace both vanity and armor headgear.
-        mod_head_texture = str(mod_equip_textures.get("TransformationHead") or mod_equip_textures.get("Head") or "")
+        mod_head_texture = str(
+            mod_equip_textures.get("TransformationHead")
+            or mod_equip_textures.get("Head")
+            or ""
+        )
         if not mod_head_texture or not Path(mod_head_texture).is_file():
             mod_head_texture = ""
-        mod_face_texture = str(mod_equip_textures.get("Face") or "")
+        mod_face_texture = (
+            str(mod_equip_textures.get("Face") or "") if face > 0 else ""
+        )
         if not mod_face_texture or not Path(mod_face_texture).is_file():
             mod_face_texture = ""
+        mod_face_head_texture = (
+            str(mod_equip_textures.get("FaceHead") or "") if face_head > 0 else ""
+        )
+        if not mod_face_head_texture or not Path(mod_face_head_texture).is_file():
+            mod_face_head_texture = ""
+        mod_face_flower_texture = (
+            str(mod_equip_textures.get("FaceFlower") or "") if face_flower > 0 else ""
+        )
+        if not mod_face_flower_texture or not Path(mod_face_flower_texture).is_file():
+            mod_face_flower_texture = ""
         mod_beard_texture = str(mod_equip_textures.get("Beard") or "")
         if not mod_beard_texture or not Path(mod_beard_texture).is_file():
             mod_beard_texture = ""
@@ -251,6 +267,12 @@ class PlayerHistoryMixin(StoreMixinContract):
                         beard_uses_hair_color=hair_flag("beardUsesHairColor", False),
                         mod_head_texture=Path(mod_head_texture) if mod_head_texture else None,
                         mod_face_texture=Path(mod_face_texture) if mod_face_texture else None,
+                        mod_face_head_texture=(
+                            Path(mod_face_head_texture) if mod_face_head_texture else None
+                        ),
+                        mod_face_flower_texture=(
+                            Path(mod_face_flower_texture) if mod_face_flower_texture else None
+                        ),
                         mod_beard_texture=Path(mod_beard_texture) if mod_beard_texture else None,
                     ),
                 )

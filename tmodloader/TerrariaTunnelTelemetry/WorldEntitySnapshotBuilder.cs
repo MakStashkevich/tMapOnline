@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.GameContent;
 using Terraria.DataStructures;
@@ -10,6 +11,7 @@ using Terraria.GameContent.Tile_Entities;
 using Terraria.ID;
 using Terraria.Localization;
 using Terraria.ModLoader;
+using Terraria.ModLoader.Default;
 
 namespace TerrariaTunnelTelemetry;
 
@@ -28,15 +30,38 @@ internal sealed class WorldEntitySnapshotBuilder
     {
         try
         {
-            // Tile entities remain authoritative on a dedicated server even when the client-only pylon list is empty.
-            return TileEntity.ByID.Values
-                .OfType<TETeleportationPylon>()
-                .Where(pylon => pylon.TryGetPylonType(out _))
-                .Select(pylon =>
+            // Match vanilla's TeleportPylonsSystem: scan registered pylon tile
+            // entities by position so both vanilla and modded pylons are found.
+            return TileEntity.ByPosition.Values
+                .OfType<TileEntity>()
+                .Where(entity => entity is IPylonTileEntity)
+                .Select(entity =>
                 {
-                    pylon.TryGetPylonType(out var type);
-                    return new { x = pylon.Position.X, y = pylon.Position.Y, type = type.ToString() };
+                    string? typeName = null;
+                    if (entity is TETeleportationPylon vanillaPylon
+                        && vanillaPylon.TryGetPylonType(out var vanillaType))
+                    {
+                        typeName = vanillaType.ToString();
+                    }
+                    else if (TEModdedPylon.GetModPylonFromCoords(
+                        entity.Position.X,
+                        entity.Position.Y,
+                        out var modPylon))
+                    {
+                        typeName = modPylon.PylonType.ToString();
+                    }
+
+                    return typeName == null
+                        ? null
+                        : new
+                        {
+                            x = entity.Position.X,
+                            y = entity.Position.Y,
+                            type = typeName
+                        };
                 })
+                .Where(pylon => pylon != null)
+                .Cast<object>()
                 .ToArray();
         }
         catch (Exception exception)
@@ -50,9 +75,21 @@ internal sealed class WorldEntitySnapshotBuilder
     internal object[] CaptureActiveNpcs()
     {
         return Main.npc
-            .Where(npc => npc.active && npc.type != NPCID.None && (npc.boss || npc.townNPC))
-            .Select(npc =>
+            .Where(npc => npc.active && npc.type != NPCID.None)
+            .Select(npc => new
             {
+                Npc = npc,
+                HeadSlot = TownNPCProfiles.GetHeadIndexSafe(npc),
+                BossHeadSlot = npc.boss ? npc.GetBossHeadTextureIndex() : -1
+            })
+            // Terraria's fullscreen map shows NPCs with a map head profile and
+            // bosses with a boss-head texture. townNPC alone is not sufficient:
+            // some modded NPCs expose a valid map head without setting that flag.
+            .Where(entry => entry.HeadSlot > 0 || entry.BossHeadSlot != -1)
+            .Select(entry =>
+            {
+                var npc = entry.Npc;
+                var mapPosition = GetMapPosition(npc, entry.BossHeadSlot);
                 var modNpc = npc.ModNPC;
                 var texture = modNpc?.Mod == null ? null : ExportNpcTexture(modNpc.Mod, modNpc.Texture);
                 var headTexture = modNpc?.Mod == null
@@ -64,19 +101,56 @@ internal sealed class WorldEntitySnapshotBuilder
                     type = npc.type,
                     name = MapTileNameCatalog.GetLocalizedNpcName(npc),
                     boss = npc.boss,
-                    direction = npc.spriteDirection,
-                    x = npc.Center.X / 16.0,
-                    y = npc.Center.Y / 16.0,
+                    direction = npc.direction,
+                    x = mapPosition.X / 16.0,
+                    y = mapPosition.Y / 16.0,
                     velocity = new { x = npc.velocity.X, y = npc.velocity.Y },
                     frameWidth = Math.Max(1, npc.frame.Width > 1 ? npc.frame.Width : npc.width),
                     frameHeight = Math.Max(1, npc.frame.Height > 1 ? npc.frame.Height : npc.height),
                     modTexture = texture,
-                    headSlot = TownNPCProfiles.GetHeadIndexSafe(npc),
-                    bossHeadSlot = npc.boss ? npc.GetBossHeadTextureIndex() : -1,
+                    headSlot = entry.HeadSlot,
+                    bossHeadSlot = entry.BossHeadSlot,
                     headTexture
                 };
             })
             .ToArray();
+    }
+
+    private static Vector2 GetMapPosition(NPC npc, int bossHeadSlot)
+    {
+        if (bossHeadSlot == -1)
+        {
+            // Main's fullscreen map centers friendly heads on the NPC hitbox.
+            return new Vector2(
+                npc.position.X + npc.width / 2,
+                npc.position.Y + npc.height / 2
+            );
+        }
+
+        var position = npc.Center + new Vector2(0f, npc.gfxOffY);
+        if (npc.type != NPCID.TheDestroyer)
+            return position;
+
+        // Terraria groups the head for the segmented Destroyer at the
+        // average center of its linked body segments.
+        var center = npc.Center;
+        var count = 1;
+        var nextIndex = (int)npc.ai[0];
+        while (count < 15 && nextIndex >= 0 && nextIndex < Main.npc.Length)
+        {
+            var next = Main.npc[nextIndex];
+            if (
+                !next.active
+                || next.type < NPCID.TheDestroyer
+                || next.type > NPCID.TheDestroyerTail
+            )
+                break;
+            center += next.Center;
+            count++;
+            nextIndex = (int)next.ai[0];
+        }
+
+        return center / count;
     }
 
     internal object[] CaptureDroppedCoins()

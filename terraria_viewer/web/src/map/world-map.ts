@@ -875,6 +875,7 @@ const modules = await activateModules('world_map');
         next.scan?.complete,
         next.active_npcs,
         next.coins,
+        next.pylons,
         (next.players || []).map((p) => [
           p.id,
           p.position?.tileX,

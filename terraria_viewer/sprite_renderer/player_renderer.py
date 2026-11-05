@@ -35,6 +35,8 @@ class PlayerAppearance:
     beard_uses_hair_color: bool = False
     mod_head_texture: Path | None = None
     mod_face_texture: Path | None = None
+    mod_face_head_texture: Path | None = None
+    mod_face_flower_texture: Path | None = None
     mod_beard_texture: Path | None = None
 
 
@@ -70,10 +72,12 @@ class PlayerSpriteRenderer:
         if appearance.face_head_id > 0:
             self._composite_optional_texture(
                 canvas,
-                images_directory / f"Acc_Face_{appearance.face_head_id}.xnb",
+                appearance.mod_face_head_texture
+                or images_directory / f"Acc_Face_{appearance.face_head_id}.xnb",
             )
 
-        if appearance.draw_face:
+        # Terraria's faceHead layer replaces the base face and eye layers.
+        if appearance.draw_face and appearance.face_head_id <= 0:
             self._composite(canvas, face, appearance.skin_color)
             self._composite(canvas, eyes_white, self._OPAQUE_WHITE)
             self._composite(canvas, eyes, appearance.eye_color)
@@ -81,7 +85,8 @@ class PlayerSpriteRenderer:
         if appearance.face_under_hair and appearance.face_id > 0:
             self._composite_optional_texture(
                 canvas,
-                images_directory / f"Acc_Face_{appearance.face_id}.xnb",
+                appearance.mod_face_texture
+                or images_directory / f"Acc_Face_{appearance.face_id}.xnb",
             )
 
         if appearance.head_id >= 0:
@@ -104,23 +109,29 @@ class PlayerSpriteRenderer:
                 tint=appearance.hair_color if appearance.beard_uses_hair_color else None,
             )
 
-        for optional_layer in (appearance.mod_beard_texture, appearance.mod_face_texture):
-            if optional_layer is not None:
-                try:
-                    self._composite(canvas, self._read_frame(optional_layer), self._OPAQUE_WHITE, True)
-                except (OSError, ValueError):
-                    # Optional mod accessories should not hide the base portrait.
-                    continue
+        if appearance.mod_beard_texture is not None:
+            try:
+                self._composite(
+                    canvas,
+                    self._read_frame(appearance.mod_beard_texture),
+                    self._OPAQUE_WHITE,
+                    True,
+                )
+            except (OSError, ValueError):
+                # Optional mod layers should not hide the base portrait.
+                pass
 
         if appearance.face_id > 0 and not appearance.face_under_hair:
             self._composite_optional_texture(
                 canvas,
-                images_directory / f"Acc_Face_{appearance.face_id}.xnb",
+                appearance.mod_face_texture
+                or images_directory / f"Acc_Face_{appearance.face_id}.xnb",
             )
         if appearance.face_flower_id > 0:
             self._composite_optional_texture(
                 canvas,
-                images_directory / f"Acc_Face_{appearance.face_flower_id}.xnb",
+                appearance.mod_face_flower_texture
+                or images_directory / f"Acc_Face_{appearance.face_flower_id}.xnb",
             )
 
         cropped = self._crop_transparent_bounds(canvas)

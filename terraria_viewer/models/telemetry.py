@@ -363,7 +363,9 @@ class LiveTelemetrySnapshot:
                 pylon for item in _json_array(root.get("pylons"))
                 if (pylon := Pylon.from_payload(item)) is not None
             ),
-            has_pylon_snapshot=bool(_json_array(root.get("pylons"))),
+            # An empty list is an authoritative snapshot too: it means the
+            # last pylon was removed and must clear the cached map markers.
+            has_pylon_snapshot=isinstance(root.get("pylons"), list),
             base_map_captures=tuple(
                 item for value in _json_array(root.get("baseMapCaptures"))
                 if (item := _optional_object(value)) is not None

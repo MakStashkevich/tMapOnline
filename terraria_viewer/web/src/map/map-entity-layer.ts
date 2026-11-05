@@ -3,15 +3,19 @@ import { createOutlinedSprite, loadSprite, playerOutlineColor } from '../core/sp
 const PYLON_TYPES: Record<string, string[]> = {
   Purity: ['Пилон леса', '#8be58e', 'Forest'],
   Forest: ['Пилон леса', '#8be58e', 'Forest'],
+  SurfacePurity: ['Пилон леса', '#8be58e', 'Forest'],
   Jungle: ['Пилон джунглей', '#75db65', 'Jungle'],
   Hallow: ['Пилон освящения', '#f3a8fa', 'Hallow'],
   Cavern: ['Пилон пещер', '#c5b5ff', 'Cavern'],
   Underground: ['Пилон пещер', '#c5b5ff', 'Cavern'],
+  Beach: ['Пилон океана', '#71d8f0', 'Ocean'],
   Ocean: ['Пилон океана', '#71d8f0', 'Ocean'],
   Desert: ['Пилон пустыни', '#eacb78', 'Desert'],
   Snow: ['Пилон снежного биома', '#bce8ff', 'Snow'],
+  GlowingMushroom: ['Пилон грибного биома', '#83d9d6', 'Mushroom'],
   Mushroom: ['Пилон грибного биома', '#83d9d6', 'Mushroom'],
   Universal: ['Универсальный пилон', '#f3eaff', 'Universal'],
+  Victory: ['Пилон победы', '#f3eaff', 'Universal'],
   Underworld: ['Пилон преисподней', '#ff916c', 'Underworld'],
   Aether: ['Эфирный пилон', '#9cdbff', 'Aether'],
 };
@@ -55,6 +59,7 @@ type MapDeathMarker = { id: string; name?: string; x: number; y: number; timesta
 
 // This is Terraria's native MapDeath texture, drawn directly without extra decoration.
 const DEATH_SPRITE = '/assets/map-death.png';
+const PLAYER_AVATAR_RENDER_REVISION = 'head-layers-2';
 
 type MarkerMotion = {
   x: number;
@@ -179,7 +184,9 @@ export class MapEntityLayer {
   }
 
   private async renderPlayerAvatar(container: HTMLElement, player: MapPlayerMarker): Promise<void> {
-    const source = player.avatar_url ? await loadSprite(player.avatar_url) : null;
+    const source = player.avatar_url
+      ? await loadSprite(this.withAvatarRenderRevision(player.avatar_url))
+      : null;
     if (source && container.isConnected) {
       container.replaceChildren(this.createRawPlayerSprite(source));
       return;
@@ -199,7 +206,7 @@ export class MapEntityLayer {
       if (response.ok) {
         const payload = (await response.json()) as { avatar_url?: string };
         if (payload.avatar_url) {
-          const source = await loadSprite(payload.avatar_url);
+          const source = await loadSprite(this.withAvatarRenderRevision(payload.avatar_url));
           if (source && container.isConnected) {
             container.replaceChildren(this.createRawPlayerSprite(source));
             return;
@@ -215,6 +222,11 @@ export class MapEntityLayer {
         void this.loadPlayerAvatarFromSavedAppearance(container, playerId);
       }, 2500);
     }
+  }
+
+  private withAvatarRenderRevision(source: string): string {
+    const separator = source.includes('?') ? '&' : '?';
+    return `${source}${separator}render=${PLAYER_AVATAR_RENDER_REVISION}`;
   }
 
   private createAvatarLoader(): HTMLElement {
@@ -326,11 +338,6 @@ export class MapEntityLayer {
       const id = String(entity.id);
       activeIds.add(id);
       let motion = this.entityMotions.get(id);
-      const visible = this.isPointVisible(x, y);
-      if (!visible) {
-        if (motion?.element) motion.element.style.visibility = 'hidden';
-        continue;
-      }
 
       if (motion && motion.spriteUrl !== entity.icon_url) {
         motion.element?.remove();
@@ -744,8 +751,7 @@ export class MapEntityLayer {
         x < 0 ||
         y < 0 ||
         x >= this.world.width ||
-        y >= this.world.height ||
-        !this.isPointVisible(x, y)
+        y >= this.world.height
       )
         continue;
       const type = String(pylon.type || '');
@@ -768,8 +774,9 @@ export class MapEntityLayer {
     if (!source || renderVersion !== this.pylonRenderVersion) return;
     const marker = document.createElement('div');
     marker.className = 'pylon-marker';
-    marker.style.left = `${((x + 0.5) / this.world.width) * 100}%`;
-    marker.style.top = `${((y + 0.5) / this.world.height) * 100}%`;
+    // TileEntity.Position is the top-left of the 3x4 pylon footprint.
+    marker.style.left = `${((x + 1.5) / this.world.width) * 100}%`;
+    marker.style.top = `${((y + 2) / this.world.height) * 100}%`;
     marker.setAttribute('aria-label', label);
     const icon = source.cloneNode() as HTMLImageElement;
     icon.className = 'pylon-icon';
