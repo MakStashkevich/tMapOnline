@@ -80,7 +80,9 @@ internal sealed class WorldEntitySnapshotBuilder
             {
                 Npc = npc,
                 HeadSlot = TownNPCProfiles.GetHeadIndexSafe(npc),
-                BossHeadSlot = npc.boss ? npc.GetBossHeadTextureIndex() : -1
+                // Match Main's map renderer: some boss-head markers, including
+                // the Celestial Pillars, have a map head without npc.boss set.
+                BossHeadSlot = npc.GetBossHeadTextureIndex()
             })
             // Terraria's fullscreen map shows NPCs with a map head profile and
             // bosses with a boss-head texture. townNPC alone is not sufficient:
