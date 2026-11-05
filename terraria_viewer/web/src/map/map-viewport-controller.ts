@@ -13,6 +13,7 @@ export type MapViewportBindings = {
   fitMap(): void;
   resizeViewport(): void;
   renderVisibleChunks(): void;
+  prioritizeWorldPoint?(point: WorldPoint): void;
   downloadMapImage(): void;
 };
 
@@ -54,11 +55,10 @@ export class MapViewportController {
   }
 
   private zoomBy(multiplier: number): void {
-    this.bindings.setScale(
-      this.bindings.getScale() * multiplier,
-      this.viewport.clientWidth / 2,
-      this.viewport.clientHeight / 2,
-    );
+    const anchorX = this.viewport.clientWidth / 2;
+    const anchorY = this.viewport.clientHeight / 2;
+    this.bindings.prioritizeWorldPoint?.(this.bindings.worldPointAt(anchorX, anchorY));
+    this.bindings.setScale(this.bindings.getScale() * multiplier, anchorX, anchorY);
   }
 
   private onWheel(event: WheelEvent): void {
@@ -66,12 +66,11 @@ export class MapViewportController {
     event.preventDefault();
 
     const viewportBounds = this.viewport.getBoundingClientRect();
+    const anchorX = event.clientX - viewportBounds.left;
+    const anchorY = event.clientY - viewportBounds.top;
+    this.bindings.prioritizeWorldPoint?.(this.bindings.worldPointAt(anchorX, anchorY));
     const multiplier = event.deltaY < 0 ? 1.15 : 1 / 1.15;
-    this.bindings.setScale(
-      this.bindings.getScale() * multiplier,
-      event.clientX - viewportBounds.left,
-      event.clientY - viewportBounds.top,
-    );
+    this.bindings.setScale(this.bindings.getScale() * multiplier, anchorX, anchorY);
   }
 
   private onPointerDown(event: PointerEvent): void {
@@ -143,6 +142,7 @@ export class MapViewportController {
     const anchorX = (first.x + second.x) / 2 - bounds.left;
     const anchorY = (first.y + second.y) / 2 - bounds.top;
 
+    this.bindings.prioritizeWorldPoint?.({ x: this.pinchStart!.x, y: this.pinchStart!.y });
     this.bindings.setScale((this.pinchStart!.scale * currentDistance) / this.pinchStart!.distance);
     this.bindings.placeWorldPoint(this.pinchStart!.x, this.pinchStart!.y, anchorX, anchorY);
   }

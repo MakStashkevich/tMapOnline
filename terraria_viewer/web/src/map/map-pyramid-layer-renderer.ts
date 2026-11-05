@@ -2,6 +2,7 @@ import { MapTileBitmapCache } from './map-tile-bitmap-cache';
 
 type WorldSize = { id: string | number; width: number; height: number };
 type MapTile = { x: number; y: number; key: string };
+type WorldPoint = { x: number; y: number };
 
 type PyramidLayerOptions = {
   layer: HTMLElement;
@@ -10,6 +11,7 @@ type PyramidLayerOptions = {
   getWorld: () => WorldSize | null;
   getScale: () => number;
   getProfile: () => string | null;
+  getPriorityPoint?: () => WorldPoint | null;
   onError: (error: unknown) => void;
 };
 
@@ -39,6 +41,7 @@ export class MapPyramidLayerRenderer {
   private lastRenderDurationMs = 0;
   private lastRenderTileCount = 0;
   private failedRenderCount = 0;
+  private activeRenderController: AbortController | null = null;
 
   constructor(private readonly options: PyramidLayerOptions) {}
 
@@ -53,11 +56,14 @@ export class MapPyramidLayerRenderer {
 
   requestRender(): void {
     if (this.renderTimer) clearTimeout(this.renderTimer);
+    this.activeRenderController?.abort();
     this.renderVersion++;
     this.renderTimer = setTimeout(() => void this.renderLatestViewport(), TILE_RENDER_DEBOUNCE_MS);
   }
 
   clear(): void {
+    this.activeRenderController?.abort();
+    this.activeRenderController = null;
     this.renderVersion++;
     if (this.renderTimer) clearTimeout(this.renderTimer);
     this.renderTimer = null;
@@ -164,22 +170,25 @@ export class MapPyramidLayerRenderer {
     do {
       this.renderPending = false;
       const version = this.renderVersion;
+      const controller = new AbortController();
+      this.activeRenderController = controller;
       const startedAt = performance.now();
       try {
-        await this.renderVisibleTiles(version);
+        await this.renderVisibleTiles(version, controller.signal);
       } catch (error) {
-        this.options.onError(error);
+        if (!controller.signal.aborted) this.options.onError(error);
       }
+      if (this.activeRenderController === controller) this.activeRenderController = null;
       this.lastRenderDurationMs = performance.now() - startedAt;
     } while (this.renderPending);
     this.renderRunning = false;
   }
 
-  private async renderVisibleTiles(version: number): Promise<void> {
+  private async renderVisibleTiles(version: number, signal: AbortSignal): Promise<void> {
     const world = this.options.getWorld();
     if (!world) return;
 
-    await this.ensurePinnedOverview(world, version);
+    await this.ensurePinnedOverview(world, version, signal);
     if (version !== this.renderVersion) return;
 
     const level = this.chooseLevel();
@@ -206,6 +215,7 @@ export class MapPyramidLayerRenderer {
     }
     if (tiles.length === 0) return;
     this.lastRenderTileCount = tiles.length;
+    const priorityPoint = this.options.getPriorityPoint?.();
 
     const desiredTileKeys = new Set(tiles.map(({ key }) => key));
     const needsNewDetailTiles = tiles.some(
@@ -220,24 +230,26 @@ export class MapPyramidLayerRenderer {
     if (level < MAX_LEVEL) {
       const fallbackLevel = level + 1;
       const fallbackTileWorldSize = TILE_SIZE * (1 << fallbackLevel);
-      const viewportCenterX =
-        (visibleBounds.left + visibleBounds.right) / 2 / fallbackTileWorldSize;
-      const viewportCenterY =
-        (visibleBounds.top + visibleBounds.bottom) / 2 / fallbackTileWorldSize;
+      const fallbackCenterX = priorityPoint
+        ? priorityPoint.x / fallbackTileWorldSize
+        : (visibleBounds.left + visibleBounds.right) / 2 / fallbackTileWorldSize;
+      const fallbackCenterY = priorityPoint
+        ? priorityPoint.y / fallbackTileWorldSize
+        : (visibleBounds.top + visibleBounds.bottom) / 2 / fallbackTileWorldSize;
       const fallbackTiles = this.parentTilesFor(tiles, world.id, fallbackLevel).sort(
         (left, right) => {
           const leftDistance = Math.hypot(
-            left.x + 0.5 - viewportCenterX,
-            left.y + 0.5 - viewportCenterY,
+            left.x + 0.5 - fallbackCenterX,
+            left.y + 0.5 - fallbackCenterY,
           );
           const rightDistance = Math.hypot(
-            right.x + 0.5 - viewportCenterX,
-            right.y + 0.5 - viewportCenterY,
+            right.x + 0.5 - fallbackCenterX,
+            right.y + 0.5 - fallbackCenterY,
           );
           return leftDistance - rightDistance;
         },
       );
-      const fallback = await this.loadTileBitmaps(fallbackTiles, world, level + 1, version);
+      const fallback = await this.loadTileBitmaps(fallbackTiles, world, level + 1, version, signal);
       if (version !== this.renderVersion) return;
 
       const fallbackCanvases = this.createTileCanvases(
@@ -258,14 +270,17 @@ export class MapPyramidLayerRenderer {
       if (fallback.failed) this.scheduleRetry();
     }
 
+    const priorityTileX = priorityPoint
+      ? Math.min(lastX - 0.5, Math.max(firstX + 0.5, priorityPoint.x / tileWorldSize))
+      : (firstX + lastX) / 2;
+    const priorityTileY = priorityPoint
+      ? Math.min(lastY - 0.5, Math.max(firstY + 0.5, priorityPoint.y / tileWorldSize))
+      : (firstY + lastY) / 2;
     const prioritizedTiles = [...tiles].sort((left, right) => {
-      const leftDistance = Math.hypot(
-        left.x + 0.5 - (firstX + lastX) / 2,
-        left.y + 0.5 - (firstY + lastY) / 2,
-      );
+      const leftDistance = Math.hypot(left.x + 0.5 - priorityTileX, left.y + 0.5 - priorityTileY);
       const rightDistance = Math.hypot(
-        right.x + 0.5 - (firstX + lastX) / 2,
-        right.y + 0.5 - (firstY + lastY) / 2,
+        right.x + 0.5 - priorityTileX,
+        right.y + 0.5 - priorityTileY,
       );
       return leftDistance - rightDistance;
     });
@@ -275,7 +290,7 @@ export class MapPyramidLayerRenderer {
       if (version !== this.renderVersion) return;
 
       const batch = prioritizedTiles.slice(start, start + TILE_RENDER_BATCH_SIZE);
-      const result = await this.loadTileBitmaps(batch, world, level, version);
+      const result = await this.loadTileBitmaps(batch, world, level, version, signal);
       if (version !== this.renderVersion) return;
 
       const canvases = this.createTileCanvases(batch, result.bitmaps, world, tileWorldSize, level);
@@ -309,7 +324,11 @@ export class MapPyramidLayerRenderer {
     return [...parents.values()];
   }
 
-  private async ensurePinnedOverview(world: WorldSize, version: number): Promise<void> {
+  private async ensurePinnedOverview(
+    world: WorldSize,
+    version: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     const overviewTileWorldSize = TILE_SIZE * (1 << MAX_LEVEL);
     const columns = Math.ceil(world.width / overviewTileWorldSize);
     const rows = Math.ceil(world.height / overviewTileWorldSize);
@@ -335,7 +354,7 @@ export class MapPyramidLayerRenderer {
     );
     if (missingTiles.length === 0) return;
 
-    const result = await this.loadTileBitmaps(missingTiles, world, MAX_LEVEL, version);
+    const result = await this.loadTileBitmaps(missingTiles, world, MAX_LEVEL, version, signal);
     if (version !== this.renderVersion) return;
 
     const canvases = this.createTileCanvases(
@@ -359,6 +378,7 @@ export class MapPyramidLayerRenderer {
     world: WorldSize,
     level: number,
     version: number,
+    signal: AbortSignal,
   ): Promise<{ bitmaps: Map<string, ImageBitmap>; failed: boolean }> {
     const bitmaps = new Map<string, ImageBitmap>();
     let failed = false;
@@ -373,7 +393,7 @@ export class MapPyramidLayerRenderer {
         requestedTiles.map(async (tile) => ({
           tile,
           bitmap: await this.bitmapCache.getOrLoad(tile.key, () =>
-            this.loadTileBitmap(world, level, tile.x, tile.y),
+            this.loadTileBitmap(world, level, tile.x, tile.y, signal),
           ),
         })),
       );
@@ -496,6 +516,7 @@ export class MapPyramidLayerRenderer {
     level: number,
     tileX: number,
     tileY: number,
+    signal: AbortSignal,
   ): Promise<ImageBitmap> {
     const query = new URLSearchParams({
       world: String(world.id),
@@ -505,8 +526,17 @@ export class MapPyramidLayerRenderer {
     });
     const profile = this.options.getProfile();
     if (profile) query.set('profile', profile);
-    const response = await this.fetchTile(query);
-    return createImageBitmap(await response.blob());
+    const response = await this.fetchTile(query, signal);
+    const blob = await response.blob();
+    if (signal.aborted) {
+      throw new DOMException('Map tile request was superseded', 'AbortError');
+    }
+    const bitmap = await createImageBitmap(blob);
+    if (signal.aborted) {
+      bitmap.close();
+      throw new DOMException('Map tile request was superseded', 'AbortError');
+    }
+    return bitmap;
   }
 
   private scheduleRetry(): void {
@@ -518,21 +548,34 @@ export class MapPyramidLayerRenderer {
     this.renderTimer = setTimeout(() => this.requestRender(), 1200);
   }
 
-  private async fetchTile(query: URLSearchParams): Promise<Response> {
+  private async fetchTile(query: URLSearchParams, signal: AbortSignal): Promise<Response> {
     let lastError: unknown = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (signal.aborted) throw new DOMException('Map tile request was superseded', 'AbortError');
       try {
         // Let the browser validate its ETag cache instead of forcing an uncached download.
-        const response = await fetch(`/api/world-map/tile?${query}`, { cache: 'default' });
+        const response = await fetch(`/api/world-map/tile?${query}`, { cache: 'default', signal });
         if (response.ok) return response;
         if (response.status < 500 && response.status !== 429) {
           throw new Error(`Map tile request failed with HTTP ${response.status}`);
         }
         lastError = new Error(`Map tile request failed with HTTP ${response.status}`);
       } catch (error) {
+        if (signal.aborted) throw error;
         lastError = error;
       }
-      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+      if (attempt < 2) {
+        await new Promise<void>((resolve) => {
+          const finish = () => {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', finish);
+            resolve();
+          };
+          const timer = setTimeout(finish, 200 * (attempt + 1));
+          signal.addEventListener('abort', finish, { once: true });
+          if (signal.aborted) finish();
+        });
+      }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }

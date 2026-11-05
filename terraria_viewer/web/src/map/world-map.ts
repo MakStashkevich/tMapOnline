@@ -108,6 +108,8 @@ const modules = await activateModules('world_map');
     spawnRenderKey = '',
     toggleKey = '',
     canvasWorld = '';
+  let renderPriorityPoint = null;
+  let renderPriorityExpiresAt = 0;
   const mapImageExporter = new MapImageExporter({
     button: $('download-map'),
     getWorld: () => data?.world || null,
@@ -122,6 +124,8 @@ const modules = await activateModules('world_map');
     getWorld: () => (data?.world ? data.world : null),
     getScale: () => scale,
     getProfile: () => renderProfileId,
+    getPriorityPoint: () =>
+      performance.now() < renderPriorityExpiresAt ? renderPriorityPoint : null,
     onError: (error) =>
       status(
         `Не удалось загрузить фрагмент карты: ${error instanceof Error ? error.message : String(error)}`,
@@ -1401,6 +1405,10 @@ const modules = await activateModules('world_map');
     fitMap,
     resizeViewport,
     renderVisibleChunks: scheduleViewportLayerUpdate,
+    prioritizeWorldPoint: (point) => {
+      renderPriorityPoint = point;
+      renderPriorityExpiresAt = performance.now() + 1500;
+    },
     downloadMapImage,
   });
   viewportController.bind();
