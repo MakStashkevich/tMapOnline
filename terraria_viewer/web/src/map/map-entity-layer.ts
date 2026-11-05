@@ -240,9 +240,15 @@ export class MapEntityLayer {
     const activeIds = new Set<string>();
     for (const player of players) {
       const point = this.markerPosition(player);
-      if (!point || !player.avatar_url || !this.isPointVisible(point.x, point.y)) continue;
+      if (!point || !player.avatar_url) continue;
       activeIds.add(player.id);
       let motion = this.playerMotions.get(player.id);
+      const visible = this.isPointVisible(point.x, point.y);
+      if (!visible) {
+        if (motion?.element) motion.element.style.visibility = 'hidden';
+        continue;
+      }
+
       if (motion && motion.spriteUrl !== player.avatar_url) {
         motion.element?.remove();
         this.playerMotions.delete(player.id);
@@ -259,6 +265,7 @@ export class MapEntityLayer {
         this.playerMotions.set(player.id, motion);
         void this.appendPlayerMarker(layer, player, motion);
       } else {
+        if (motion.element) motion.element.style.visibility = 'visible';
         const resetMotion =
           player.teleported === true || this.isLargeJump(motion, point.x, point.y);
         this.updateMotion(motion, point.x, point.y, player.velocity, resetMotion);
@@ -282,18 +289,20 @@ export class MapEntityLayer {
   ): Promise<void> {
     const source = await loadSprite(motion.spriteUrl);
     if (!source || this.playerMotions.get(player.id) !== motion) return;
-    const sprite = createOutlinedSprite(source, playerOutlineColor(player.team));
-    if (!sprite) return;
+    const sprite =
+      createOutlinedSprite(source, playerOutlineColor(player.team)) ||
+      this.createPlainSprite(source);
 
     const marker = document.createElement('div');
     marker.className = 'player-marker';
     marker.setAttribute('aria-label', `Игрок ${player.name || 'без имени'}`);
+    const point = this.predictedPosition(motion, performance.now());
+    marker.style.visibility = this.isPointVisible(point.x, point.y) ? 'visible' : 'hidden';
     sprite.className = 'player-head-sprite';
     if (player.direction === -1) sprite.classList.add('facing-left');
     marker.append(sprite);
     layer.append(marker);
     motion.element = marker;
-    const point = this.predictedPosition(motion, performance.now());
     this.positionMarker(marker, point.x, point.y);
   }
 
@@ -311,13 +320,18 @@ export class MapEntityLayer {
         y < 0 ||
         x >= this.world.width ||
         y >= this.world.height ||
-        !entity.icon_url ||
-        !this.isPointVisible(x, y)
+        !entity.icon_url
       )
         continue;
       const id = String(entity.id);
       activeIds.add(id);
       let motion = this.entityMotions.get(id);
+      const visible = this.isPointVisible(x, y);
+      if (!visible) {
+        if (motion?.element) motion.element.style.visibility = 'hidden';
+        continue;
+      }
+
       if (motion && motion.spriteUrl !== entity.icon_url) {
         motion.element?.remove();
         this.entityMotions.delete(id);
@@ -328,6 +342,7 @@ export class MapEntityLayer {
         this.entityMotions.set(id, motion);
         void this.appendEntityMarker(layer, entity, motion);
       } else {
+        if (motion.element) motion.element.style.visibility = 'visible';
         this.updateMotion(motion, x, y, entity.velocity, this.isLargeJump(motion, x, y));
         motion.direction = entity.direction;
         this.updateMarkerDirection(motion.element, 'entity-head-sprite', entity.direction === 1);
@@ -354,11 +369,11 @@ export class MapEntityLayer {
     const source = await loadSprite(motion.spriteUrl);
     const id = String(entity.id);
     if (!source || this.entityMotions.get(id) !== motion) return;
-    const sprite = createOutlinedSprite(source, '#ffffff');
-    if (!sprite) return;
+    const sprite = createOutlinedSprite(source, '#ffffff') || this.createPlainSprite(source);
     const marker = document.createElement('div');
     marker.className = `entity-marker${entity.boss ? ' boss' : ''}`;
     marker.title = entity.name || (entity.boss ? 'Босс' : 'NPC');
+    marker.style.visibility = this.isPointVisible(motion.x, motion.y) ? 'visible' : 'hidden';
     sprite.className = 'entity-head-sprite';
     // Terraria draws NPC sprites flipped when spriteDirection is 1.
     if (entity.direction === 1) sprite.classList.add('facing-left');
@@ -367,6 +382,14 @@ export class MapEntityLayer {
     motion.element = marker;
     const point = this.predictedPosition(motion, performance.now());
     this.positionMarker(marker, point.x, point.y);
+  }
+
+  private createPlainSprite(source: HTMLImageElement): HTMLImageElement {
+    const sprite = document.createElement('img');
+    sprite.alt = '';
+    sprite.decoding = 'async';
+    sprite.src = source.src;
+    return sprite;
   }
 
   private createMotion(

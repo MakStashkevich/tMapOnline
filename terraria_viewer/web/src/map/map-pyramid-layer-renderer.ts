@@ -266,6 +266,7 @@ export class MapPyramidLayerRenderer {
       this.installTileCanvases(fallbackCanvases);
       this.removeCanvasesOutside(
         new Set([...desiredTileKeys, ...fallbackTiles.map(({ key }) => key)]),
+        true,
       );
       if (fallback.failed) this.scheduleRetry();
     }
@@ -301,7 +302,7 @@ export class MapPyramidLayerRenderer {
       }
       failedTiles ||= result.failed;
       this.removeCoveredFallbackTiles(tiles, level);
-      this.removeCanvasesOutside(this.getRequiredTileKeys(tiles, level));
+      this.removeCanvasesOutside(this.getRequiredTileKeys(tiles, level), true);
 
       if (start + TILE_RENDER_BATCH_SIZE < prioritizedTiles.length) await this.nextFrame();
     }
@@ -310,6 +311,7 @@ export class MapPyramidLayerRenderer {
       this.scheduleRetry();
       return;
     }
+    this.removeCanvasesOutside(this.getRequiredTileKeys(tiles, level));
     this.failedRenderCount = 0;
   }
 
@@ -445,6 +447,7 @@ export class MapPyramidLayerRenderer {
           event.preventDefault();
           if (this.canvases.get(tile.key) !== canvas) return;
 
+          canvas.style.visibility = 'hidden';
           this.invalidatedTiles.add(tile.key);
           this.requestRender();
         });
@@ -501,9 +504,41 @@ export class MapPyramidLayerRenderer {
     return required;
   }
 
-  private removeCanvasesOutside(requiredKeys: Set<string>): void {
+  private removeCanvasesOutside(requiredKeys: Set<string>, preserveVisible = false): void {
     const retainedKeys = new Set([...requiredKeys].slice(0, MAX_ACTIVE_TILE_CANVASES));
     for (const key of this.pinnedOverviewKeys) retainedKeys.add(key);
+
+    if (preserveVisible && retainedKeys.size < MAX_ACTIVE_TILE_CANVASES) {
+      const world = this.options.getWorld();
+      if (world) {
+        const bounds = this.getVisibleWorldBounds(world);
+        const existingVisibleTiles = [...this.canvases.entries()]
+          .filter(([key, canvas]) => {
+            if (retainedKeys.has(key)) return false;
+            const left = Number(canvas.dataset.worldLeft);
+            const top = Number(canvas.dataset.worldTop);
+            const right = left + Number(canvas.dataset.worldWidth);
+            const bottom = top + Number(canvas.dataset.worldHeight);
+            return (
+              right > bounds.left &&
+              left < bounds.right &&
+              bottom > bounds.top &&
+              top < bounds.bottom
+            );
+          })
+          .sort(([, left], [, right]) => {
+            const leftLevel = MAX_LEVEL - Number(left.style.zIndex);
+            const rightLevel = MAX_LEVEL - Number(right.style.zIndex);
+            return leftLevel - rightLevel;
+          });
+
+        for (const [key] of existingVisibleTiles) {
+          if (retainedKeys.size >= MAX_ACTIVE_TILE_CANVASES) break;
+          retainedKeys.add(key);
+        }
+      }
+    }
+
     for (const [key, canvas] of this.canvases) {
       if (retainedKeys.has(key)) continue;
       canvas.remove();
