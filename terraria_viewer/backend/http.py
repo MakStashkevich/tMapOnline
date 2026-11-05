@@ -111,7 +111,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 self._send(400, b"invalid tile coordinates\n", "text/plain; charset=utf-8")
                 return
-            tile = self.store.world_map_tile(params.get("world", [None])[0], tile_x, tile_y)
+            world_id = params.get("world", [None])[0]
+            profile_id = params.get("profile", [None])[0]
+            if not self.store.world_map_profile_allows_tile(profile_id, world_id, tile_x, tile_y):
+                self._send(404, b"tile details are hidden by map profile\n", "text/plain; charset=utf-8")
+                return
+            tile = self.store.world_map_tile(world_id, tile_x, tile_y)
             if tile is None:
                 self._send(404, b"tile details not available\n", "text/plain; charset=utf-8")
             else:
@@ -129,7 +134,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(400, b"map tile coordinates are out of range\n", "text/plain; charset=utf-8")
                 return
             tile = self.store.world_map_image_tile(
-                params.get("world", [None])[0], level, tile_x, tile_y
+                params.get("world", [None])[0],
+                level,
+                tile_x,
+                tile_y,
+                params.get("profile", [None])[0],
             )
             if tile is None:
                 self._send(404, b"map tile is unavailable\n", "text/plain; charset=utf-8")
@@ -185,11 +194,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 live_since = max(0.0, float(params.get("live_since", ["0"])[0]))
             except (TypeError, ValueError):
                 live_since = 0.0
+            include_positions = params.get("positions", ["1"])[0] != "0"
             # Keep raw map pixels out of the default response. A caller that
             # explicitly needs the legacy full payload can pass tiles=0.
             include_chunks = params.get("tiles", ["1"])[0] == "0"
             body = json.dumps(
-                self.store.world_map(world_id, since, live_since, include_chunks),
+                self.store.world_map(
+                    world_id, since, live_since, include_chunks, include_positions
+                ),
                 ensure_ascii=False,
             ).encode("utf-8")
             accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "").lower()
@@ -314,6 +326,56 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request = urlsplit(self.path)
+        if request.path == "/api/world-map/render-profile":
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                content_length = 0
+            if not 2 <= content_length <= 64 * 1024:
+                self._send(400, b"invalid map render profile request\n", "text/plain; charset=utf-8")
+                return
+            try:
+                payload: Any = json.loads(self.rfile.read(content_length))
+                if not isinstance(payload, dict):
+                    raise ValueError("Профиль карты должен быть объектом.")
+                payload = cast(dict[str, Any], payload)
+                raw_explore_ids = payload.get("explore_players", [])
+                raw_route_ids = payload.get("route_players", [])
+                explore_values = cast(list[Any], raw_explore_ids) if isinstance(raw_explore_ids, list) else None
+                route_values = cast(list[Any], raw_route_ids) if isinstance(raw_route_ids, list) else None
+                if explore_values is None or not all(
+                    isinstance(value, str) for value in explore_values
+                ):
+                    raise ValueError("Список игроков исследования некорректен.")
+                if route_values is None or not all(
+                    isinstance(value, str) for value in route_values
+                ):
+                    raise ValueError("Список игроков маршрутов некорректен.")
+                explore_ids = cast(list[str], explore_values)
+                route_ids = cast(list[str], route_values)
+                profile = self.store.create_map_render_profile(
+                    str(payload.get("world") or "") or None,
+                    explore_ids,
+                    route_ids,
+                    str(payload.get("period") or "7d"),
+                    payload.get("full_map") is True,
+                )
+                body = json.dumps(profile, ensure_ascii=False).encode("utf-8")
+                content_encoding = None
+                if "gzip" in self.headers.get("Accept-Encoding", "").lower() and len(body) >= 1024:
+                    body = gzip.compress(body, compresslevel=1, mtime=0)
+                    content_encoding = "gzip"
+            except (ValueError, OSError, zlib.error) as error:
+                self._send(400, str(error).encode("utf-8"), "text/plain; charset=utf-8")
+                return
+            self._send(
+                200,
+                body,
+                "application/json; charset=utf-8",
+                cache_control="no-store",
+                content_encoding=content_encoding,
+            )
+            return
         if request.path == "/api/world-map/export-player-map":
             origin = urlsplit(self.headers.get("Origin", ""))
             forwarded_proto = self.headers.get("X-Forwarded-Proto", "http").split(",", 1)[0].strip()

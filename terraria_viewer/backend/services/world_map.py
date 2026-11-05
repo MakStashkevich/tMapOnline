@@ -167,6 +167,7 @@ class WorldMapMixin(StoreMixinContract):
         since: float = 0,
         live_since: float = 0,
         include_chunks: bool = True,
+        include_positions: bool = True,
     ) -> dict[str, Any]:
         with self._lock:
             active_id = self._server_info.get("world_id")
@@ -284,7 +285,9 @@ class WorldMapMixin(StoreMixinContract):
                     if session_seconds is None and active_session is not None:
                         session_seconds = active_session.get("duration_seconds")
                     raw_positions = world.get("positions", [])
-                    if live_since <= 0:
+                    if not include_positions:
+                        positions = []
+                    elif live_since <= 0:
                         positions = _compact_positions(raw_positions)
                     else:
                         positions = _positions_after(raw_positions, live_since)
@@ -362,10 +365,124 @@ class WorldMapMixin(StoreMixinContract):
                 },
             }
 
+    def create_map_render_profile(
+        self,
+        world_id: str | None,
+        explore_player_ids: list[str],
+        route_player_ids: list[str],
+        period: str,
+        full_map: bool = False,
+    ) -> dict[str, Any]:
+        """Build per-player masks and return their combined map render profile."""
+        period_seconds = {"24h": 24 * 60 * 60, "7d": 7 * 24 * 60 * 60, "30d": 30 * 24 * 60 * 60}.get(period)
+        if period_seconds is None:
+            raise ValueError("Период маршрута должен быть 24h, 7d или 30d.")
+
+        explore_ids = {player_id for player_id in explore_player_ids if player_id and len(player_id) <= 128}
+        route_ids = {player_id for player_id in route_player_ids if player_id and len(player_id) <= 128}
+        if len(explore_ids) > 32 or len(route_ids) > 32:
+            raise ValueError("Слишком много игроков для одного профиля карты.")
+
+        requested = str(world_id or "")
+        now = time.time()
+        route_cutoff = now - period_seconds
+        with self._lock:
+            active_id = str(self._server_info.get("world_id") or "")
+            requested = requested or active_id
+            selected_world: dict[str, Any] | None = None
+            for candidate in self._world_map_cache.values():
+                if requested and requested not in {
+                    str(candidate.get("world_id") or ""),
+                    str(candidate.get("world_name") or ""),
+                }:
+                    continue
+                selected_world = candidate
+                break
+
+            width = int((selected_world or {}).get("width") or self._server_info.get("world_width") or 0)
+            height = int((selected_world or {}).get("height") or self._server_info.get("world_height") or 0)
+            if width < 1 or height < 1:
+                raise ValueError("Не удалось определить размер мира для профиля карты.")
+            surface_value = (selected_world or {}).get("surface_y", self._server_info.get("world_surface"))
+            try:
+                surface_y = int(surface_value) if surface_value is not None else None
+            except (TypeError, ValueError):
+                surface_y = None
+
+            player_sources: list[dict[str, Any]] = []
+            route_positions: dict[str, list[dict[str, Any]]] = {}
+            for player_id in sorted(explore_ids | route_ids):
+                movement = self._load_movement(player_id)
+                player_world: dict[str, Any] | None = None
+                for key, candidate in as_json_object(movement.get("worlds")).items():
+                    candidate_id = str(candidate.get("world_id") or key.split(":", 1)[0])
+                    candidate_name = str(candidate.get("world_name") or "")
+                    if requested in {candidate_id, candidate_name, str(key)}:
+                        player_world = candidate
+                        break
+                if player_world is None:
+                    continue
+
+                source: dict[str, Any] = {"id": player_id}
+                if player_id in explore_ids:
+                    exploration = player_world.get("map_exploration")
+                    if isinstance(exploration, dict):
+                        filename = str(exploration.get("filename") or "")
+                        expected_filename = (
+                            f"{requested}-{hashlib.sha256(player_id.encode('utf-8')).hexdigest()[:32]}.png"
+                        )
+                        if filename == expected_filename:
+                            try:
+                                source["exploration_png"] = (self._exploration_dir / filename).read_bytes()
+                            except OSError:
+                                pass
+
+                if player_id in route_ids:
+                    selected_points: list[dict[str, Any]] = []
+                    for point in player_world.get("positions", []):
+                        if not isinstance(point, dict):
+                            continue
+                        try:
+                            timestamp = float(point.get("time", 0) or 0)
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        if route_cutoff <= timestamp <= now:
+                            selected_points.append(dict(point))
+                    if selected_points:
+                        source["route_positions"] = selected_points
+                        route_positions[player_id] = selected_points
+                player_sources.append(source)
+
+        profile = self._map_render_profiles.build(
+            requested,
+            width,
+            height,
+            surface_y,
+            player_sources,
+            full_map=full_map,
+        )
+        profile["world_id"] = requested
+        profile["routes"] = {
+            player_id: _compact_positions(points)
+            for player_id, points in route_positions.items()
+        }
+        profile["route_player_ids"] = sorted(route_ids)
+        profile["period"] = period
+        profile["generated_at"] = now
+        return profile
+
     def world_map_image_tile(
-        self, world_id: str | None, level: int, tile_x: int, tile_y: int
+        self,
+        world_id: str | None,
+        level: int,
+        tile_x: int,
+        tile_y: int,
+        profile_id: str | None = None,
     ) -> tuple[bytes, int] | None:
         """Compose one visible pyramid tile without serializing the entire map."""
+        visibility_mask = self._map_render_profiles.get_mask(profile_id) if profile_id else None
+        if profile_id and visibility_mask is None:
+            return None
         with self._lock:
             active_id = str(self._server_info.get("world_id") or "")
             active_name = str(self._server_info.get("world") or "")
@@ -438,12 +555,14 @@ class WorldMapMixin(StoreMixinContract):
                                 # Imported and legacy chunks may not have revision stamps.
                                 tile_fingerprint.update(encoded.encode("ascii"))
 
+            if profile_id:
+                tile_fingerprint.update(profile_id.encode("ascii"))
             fingerprint = int.from_bytes(tile_fingerprint.digest(), "big")
-            cache_key = f"{requested}:{width}x{height}:{fingerprint}:{level}:{tile_x}:{tile_y}"
+            cache_key = f"{requested}:{width}x{height}:{fingerprint}:{profile_id or 'full'}:{level}:{tile_x}:{tile_y}"
 
         with self._map_tile_generation_lock:
             image = self._map_tile_pyramid.render(
-                cache_key, width, height, level, tile_x, tile_y, chunks
+                cache_key, width, height, level, tile_x, tile_y, chunks, visibility_mask
             )
         return image, fingerprint
 
@@ -607,6 +726,35 @@ class WorldMapMixin(StoreMixinContract):
                     "configured_intervals": dict(self._server_info.get("telemetry_intervals", {})),
                 },
             }
+
+    def world_map_profile_allows_tile(
+        self, profile_id: str | None, world_id: str | None, tile_x: int, tile_y: int
+    ) -> bool:
+        if not profile_id:
+            return True
+        mask = self._map_render_profiles.get_mask(profile_id)
+        if mask is None:
+            return False
+        requested = str(world_id or "")
+        with self._lock:
+            for world_cache in self._world_map_cache.values():
+                if requested and requested not in {
+                    str(world_cache.get("world_id") or ""),
+                    str(world_cache.get("world_name") or ""),
+                }:
+                    continue
+                width = int(world_cache.get("width") or 0)
+                height = int(world_cache.get("height") or 0)
+                mask_width = (width + 3) // 4
+                mask_height = (height + 3) // 4
+                mask_x = tile_x // 4
+                mask_y = tile_y // 4
+                return (
+                    0 <= mask_x < mask_width
+                    and 0 <= mask_y < mask_height
+                    and mask[mask_y * mask_width + mask_x] != 0
+                )
+        return False
 
     def world_map_tile(self, world_id: str | None, tile_x: int, tile_y: int) -> dict[str, Any] | None:
         with self._lock:

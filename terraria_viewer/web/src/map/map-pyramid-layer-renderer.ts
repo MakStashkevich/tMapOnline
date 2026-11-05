@@ -9,6 +9,7 @@ type PyramidLayerOptions = {
   stage: HTMLElement;
   getWorld: () => WorldSize | null;
   getScale: () => number;
+  getProfile: () => string | null;
   onError: (error: unknown) => void;
 };
 
@@ -428,6 +429,8 @@ export class MapPyramidLayerRenderer {
       x: String(tileX),
       y: String(tileY),
     });
+    const profile = this.options.getProfile();
+    if (profile) query.set('profile', profile);
     const response = await this.fetchTile(query);
     return createImageBitmap(await response.blob());
   }

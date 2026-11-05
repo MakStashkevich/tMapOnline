@@ -128,6 +128,7 @@ class StoreMixinContract(Protocol):
     _telemetry_interval_ms: float | None
     _telemetry_snapshot_id: int | None
     _movement_last_saved_at: dict[str, float]
+    _map_render_profiles: Any
     _players_last_saved_monotonic: float
     _metrics_last_saved_monotonic: float
     _active_npcs: list[NpcEntity]

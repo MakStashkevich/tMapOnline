@@ -15,9 +15,8 @@ type MapTooltipBindings = {
   tooltip: HTMLElement;
   getData(): TooltipMapData;
   getScale(): number;
-  getMaskCanvas(): HTMLCanvasElement | null;
+  getProfile(): string | null;
   isEnabled(): boolean;
-  isFullMapEnabled(): boolean;
   getPlayerPoint(player: any): { x: number; y: number } | null;
 };
 
@@ -93,7 +92,6 @@ export class MapTooltipController {
       return;
     }
 
-    if (this.isPixelHidden(x, y)) return;
     const info = await this.getTileInfo(data, x, y);
     if (token !== this.hoverToken) return;
 
@@ -109,18 +107,6 @@ export class MapTooltipController {
     this.show(cursor, title, details.join(' — '));
   }
 
-  private isPixelHidden(x: number, y: number): boolean {
-    if (this.bindings.isFullMapEnabled()) return false;
-
-    const mask = this.bindings.getMaskCanvas();
-    if (!mask) return false;
-
-    const maskX = Math.floor(x * 0.25);
-    const maskY = Math.floor(y * 0.25);
-    if (maskX < 0 || maskY < 0 || maskX >= mask.width || maskY >= mask.height) return true;
-    return mask.getContext('2d')?.getImageData(maskX, maskY, 1, 1).data[3] < 32;
-  }
-
   private async getTileInfo(data: TooltipMapData, x: number, y: number): Promise<any> {
     const cacheKey = `${data.world.id}:${data.tile_info_updated_at || 0}:${x},${y}`;
     const cached = this.tileInfoCache.get(cacheKey);
@@ -132,6 +118,8 @@ export class MapTooltipController {
         x: String(x),
         y: String(y),
       });
+      const profile = this.bindings.getProfile();
+      if (profile) query.set('profile', profile);
       const response = await fetch(`/api/world-map/tile-info?${query}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 

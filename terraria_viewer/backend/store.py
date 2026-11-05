@@ -10,6 +10,7 @@ from .services.live_telemetry import LiveTelemetryMixin
 from .services.monitoring import MonitoringMixin
 from .services.world_map import WorldMapMixin
 from .services.map_tile_pyramid import MapTilePyramid
+from .services.map_render_profiles import MapRenderProfileStore
 from ..sprite_renderer import MapItemSpriteRenderer, NpcSpriteRenderer, PlayerSpriteRenderer
 
 
@@ -68,6 +69,7 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._map_tile_pyramid = MapTilePyramid(
             disk_cache_directory=movements_dir.parent / "map-tile-pyramid"
         )
+        self._map_render_profiles = MapRenderProfileStore()
         self._map_tile_generation_lock = threading.BoundedSemaphore(2)
         self._boss_cache_dir = boss_cache_dir
         self.boss_cache_directory = boss_cache_dir

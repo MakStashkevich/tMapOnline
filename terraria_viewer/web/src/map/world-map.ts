@@ -1,6 +1,5 @@
 import { activateModules } from '../core/modules';
 import { renderIcons } from '../core/icons';
-import { MapChunkCodec, type MapChunkSource } from './map-chunk-codec';
 import { MapViewportController } from './map-viewport-controller';
 import { MapEntityLayer } from './map-entity-layer';
 import { MapTooltipController } from './map-tooltip-controller';
@@ -8,7 +7,6 @@ import { MapPlayerPathService } from './map-player-path-service';
 import { MapRouteLayer } from './map-route-layer';
 import { MapDiagnosticsPanel } from './map-diagnostics-panel';
 import { MapPyramidLayerRenderer } from './map-pyramid-layer-renderer';
-import { MapExplorationMask } from './map-exploration-mask';
 import { MapImageExporter } from './map-image-exporter';
 import { MapRenderDebugPanel } from './map-render-debug-panel';
 
@@ -52,7 +50,6 @@ const modules = await activateModules('world_map');
     '#f17cbb',
     '#b8d87a',
   ];
-  const MASK_SCALE = 0.25;
   const ANIMATED_MARKER_ZOOM_THRESHOLD = 15;
   let data = null,
     scale = 1,
@@ -66,6 +63,18 @@ const modules = await activateModules('world_map');
     liveRequestActive = false,
     liveSince = 0,
     mapRevision = 0;
+  let renderProfileId: string | null = null;
+  let routePeriod = '7d';
+  let activeRoutePeriod = '7d';
+  let profileRequestVersion = 0;
+  const routeHistories = new Map<string, any[]>();
+  let activeRoutePlayerIds = new Set<string>();
+  try {
+    const savedRoutePeriod = localStorage.getItem('terraria-world-map-route-period');
+    if (savedRoutePeriod === '24h' || savedRoutePeriod === '7d' || savedRoutePeriod === '30d') {
+      routePeriod = savedRoutePeriod;
+    }
+  } catch {}
   let liveEventSource: EventSource | null = null;
   let liveStreamConnected = false;
   let liveStreamIntervalMs = 0;
@@ -89,13 +98,7 @@ const modules = await activateModules('world_map');
     const savedRenderDebugPreference = localStorage.getItem('terraria-world-map-render-debug');
     renderDebugWindowEnabled = debugMode && savedRenderDebugPreference !== 'false';
   } catch {}
-  let chunkOwners = new Map(),
-    explorationImageCache = new Map();
-  let maskCanvas = null,
-    fogCanvas = $('fog-layer') as HTMLCanvasElement,
-    explorationMask = null,
-    maskPlayersKey = '',
-    routeKey = '',
+  let routeKey = '',
     markerKey = '',
     entityRenderKey = '',
     coinRenderKey = '',
@@ -103,18 +106,11 @@ const modules = await activateModules('world_map');
     pylonRenderKey = '',
     spawnRenderKey = '',
     toggleKey = '',
-    canvasWorld = '',
-    chunkSize = 64;
-  const mapChunkCodec = new MapChunkCodec();
+    canvasWorld = '';
   const mapImageExporter = new MapImageExporter({
     button: $('download-map'),
-    codec: mapChunkCodec,
     getWorld: () => data?.world || null,
-    getChunkOwners: () => chunkOwners as Map<string, MapChunkSource>,
-    getChunkSize: () => chunkSize,
-    getMaskCanvas: () => maskCanvas,
-    isFullMapEnabled: () => fullMapEnabled,
-    nextFrame: () => nextFrame(),
+    getProfile: () => renderProfileId,
     onError: (error) =>
       status(`Не удалось скачать карту: ${error instanceof Error ? error.message : String(error)}`),
   });
@@ -124,6 +120,7 @@ const modules = await activateModules('world_map');
     stage: $('stage'),
     getWorld: () => (data?.world ? data.world : null),
     getScale: () => scale,
+    getProfile: () => renderProfileId,
     onError: (error) =>
       status(
         `Не удалось загрузить фрагмент карты: ${error instanceof Error ? error.message : String(error)}`,
@@ -131,10 +128,8 @@ const modules = await activateModules('world_map');
   });
   const renderDebugPanel = debugMode
     ? new MapRenderDebugPanel($('map-render-debug-window'), () => {
-        const mask = maskCanvas;
         return {
           ...chunkLayerRenderer.getDebugMetrics(),
-          extraCanvasBytes: mask ? mask.width * mask.height * 4 : 0,
           spawnMarkerVisible: Boolean($('spawn')?.querySelector('.spawn-marker')),
         };
       })
@@ -159,9 +154,8 @@ const modules = await activateModules('world_map');
     tooltip: $('map-tooltip'),
     getData: () => data,
     getScale: () => scale,
-    getMaskCanvas: () => maskCanvas,
+    getProfile: () => renderProfileId,
     isEnabled: () => Boolean(modules['world_map.tooltips']),
-    isFullMapEnabled: () => fullMapEnabled,
     getPlayerPoint: (player) => mapEntityLayer.markerPosition(player),
   });
   // Diagnostics UI is created only on the dedicated debug route.
@@ -177,6 +171,10 @@ const modules = await activateModules('world_map');
         ? { explore: true, route: false }
         : { explore: value !== false, route: true };
   };
+  const selectedRoutePlayerIds = () =>
+    (data?.players || [])
+      .filter((player) => playerOptions(player).route)
+      .map((player) => player.id);
   const status = (message) => {
     $('status').textContent = message;
     $('status').hidden = !message;
@@ -248,32 +246,6 @@ const modules = await activateModules('world_map');
     paths.style.width = `${visibleArea.screenWidth}px`;
     paths.style.height = `${visibleArea.screenHeight}px`;
   };
-  const layoutFogCanvas = () => {
-    if (!data?.world) return;
-    fogCanvas.style.width = `${data.world.width * scale}px`;
-    fogCanvas.style.height = `${data.world.height * scale}px`;
-  };
-  const updateFogCanvas = () => {
-    if (!maskCanvas || !data?.world) return;
-    const context = fogCanvas.getContext('2d');
-    if (!context) return;
-
-    if (fogCanvas.width !== maskCanvas.width || fogCanvas.height !== maskCanvas.height) {
-      fogCanvas.width = maskCanvas.width;
-      fogCanvas.height = maskCanvas.height;
-    }
-    layoutFogCanvas();
-    fogCanvas.style.display = fullMapEnabled ? 'none' : 'block';
-    context.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
-    if (fullMapEnabled) return;
-
-    context.fillStyle = '#05090d';
-    context.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
-    context.globalCompositeOperation = 'destination-out';
-    context.imageSmoothingEnabled = false;
-    context.drawImage(maskCanvas, 0, 0);
-    context.globalCompositeOperation = 'source-over';
-  };
   let liveBoundsTimer: ReturnType<typeof setTimeout> | null = null;
   let liveSubscriptionKey = '';
   let renderedViewportKey = '';
@@ -320,36 +292,7 @@ const modules = await activateModules('world_map');
   };
   const downloadMapImage = async () => {
     if (!data?.world?.id) return;
-
-    const currentData = data;
-    try {
-      const params = new URLSearchParams({ world: String(currentData.world.id) });
-      const response = await fetch(`/api/world-map?${params}`, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      // The complete chunk set is fetched only for an explicit full-resolution export.
-      data = await response.json();
-      updateChunkOwners(
-        Number(data.world.width),
-        Number(data.world.height),
-        Number(data.chunk_size || 64),
-        data.players || [],
-      );
-      await mapImageExporter.download();
-    } catch (error) {
-      status(
-        `Не удалось подготовить PNG: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    } finally {
-      data = currentData;
-      updateChunkOwners(
-        Number(data.world.width),
-        Number(data.world.height),
-        Number(data.chunk_size || 64),
-        data.players || [],
-      );
-      requestVisibleChunkRender();
-    }
+    await mapImageExporter.download();
   };
   const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   const setScale = (next, anchorX = null, anchorY = null) => {
@@ -367,7 +310,6 @@ const modules = await activateModules('world_map');
     mapEntityLayer.refreshMarkerPositions();
     $('stage').classList.toggle('pixelated', scale >= 1);
     layoutVisibleChunks();
-    layoutFogCanvas();
     $('zoom-level').textContent = `${Math.round((scale / fitScale) * 100)}%`;
     if (worldPoint) placeWorldPoint(worldPoint.x, worldPoint.y, anchorX, anchorY);
     scheduleViewportLayerUpdate();
@@ -437,35 +379,10 @@ const modules = await activateModules('world_map');
   };
   const redrawVisiblePaths = () => {
     if (!data) return;
-    routeLayer.render(
-      playerPaths
-        .withPaths(data?.players || [], data.world)
-        .filter((player) => playerOptions(player).route),
-      data.players || [],
-    );
-  };
-  const getExplorationBitmap = async (url) => {
-    if (!url) return null;
-    if (!explorationImageCache.has(url)) {
-      const promise = fetchWithTimeout(url, { cache: 'force-cache' }, 10000)
-        .then((response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.blob();
-        })
-        .then((blob) => createImageBitmap(blob));
-      explorationImageCache.set(url, promise);
-      while (explorationImageCache.size > 16) {
-        const [oldUrl, oldPromise] = explorationImageCache.entries().next().value;
-        explorationImageCache.delete(oldUrl);
-        oldPromise.then((bitmap) => bitmap.close()).catch(() => {});
-      }
-    }
-    try {
-      return await explorationImageCache.get(url);
-    } catch {
-      explorationImageCache.delete(url);
-      return null;
-    }
+    const routedPlayers = (data.players || [])
+      .filter((player) => activeRoutePlayerIds.has(player.id) && playerOptions(player).route)
+      .map((player) => ({ ...player, positions: routeHistories.get(player.id) || [] }));
+    routeLayer.render(playerPaths.withPaths(routedPlayers, data.world), data.players || []);
   };
   const renderToggles = () => {
     const signature = JSON.stringify(
@@ -485,6 +402,61 @@ const modules = await activateModules('world_map');
       label.className = 'players-label';
       label.textContent = 'Игроки:';
       nav.append(label);
+      const routeToolbar = document.createElement('span');
+      routeToolbar.className = 'route-toolbar';
+      const routePeriodSelect = document.createElement('select');
+      routePeriodSelect.className = 'route-period';
+      routePeriodSelect.setAttribute('aria-label', 'Период линий маршрутов');
+      for (const [value, title] of [
+        ['24h', '24 часа'],
+        ['7d', '7 дней'],
+        ['30d', '30 дней'],
+      ]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = title;
+        routePeriodSelect.append(option);
+      }
+      routePeriodSelect.value = routePeriod;
+      routePeriodSelect.addEventListener('change', () => {
+        routePeriod = routePeriodSelect.value;
+        try {
+          localStorage.setItem('terraria-world-map-route-period', routePeriod);
+        } catch {}
+        document.querySelectorAll<HTMLSelectElement>('.route-period').forEach((select) => {
+          select.value = routePeriod;
+        });
+        document.querySelectorAll<HTMLButtonElement>('.route-load').forEach((button) => {
+          button.textContent = routeLoadButtonLabel();
+        });
+      });
+      const routeLoadButton = document.createElement('button');
+      routeLoadButton.type = 'button';
+      routeLoadButton.className = 'route-load';
+      routeLoadButton.textContent = routeLoadButtonLabel();
+      routeLoadButton.addEventListener('click', async () => {
+        const routePlayerIds = selectedRoutePlayerIds();
+        if (!routePlayerIds.length) {
+          status('Сначала выбери игроков, чьи маршруты нужно загрузить.');
+          return;
+        }
+        routeLoadButton.disabled = true;
+        status('Загружаю маршруты и собираю маски карты…');
+        try {
+          await requestAndRenderProfile(routePlayerIds, routePeriod);
+        } catch (error) {
+          status(
+            `Не удалось загрузить маршруты: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        } finally {
+          document.querySelectorAll<HTMLButtonElement>('.route-load').forEach((button) => {
+            button.disabled = false;
+            button.textContent = routeLoadButtonLabel();
+          });
+        }
+      });
+      routeToolbar.append(routePeriodSelect, routeLoadButton);
+      nav.append(routeToolbar);
       for (const [index, player] of (data.players || []).entries()) {
         const options = playerOptions(player),
           color = colors[index % colors.length],
@@ -509,7 +481,12 @@ const modules = await activateModules('world_map');
         button.addEventListener('click', () => {
           toggleState[player.id] = { ...playerOptions(player), explore: !options.explore };
           saveOptions();
-          render();
+          const currentlyLoadedRoutes = [...activeRoutePlayerIds].filter(
+            (playerId) =>
+              playerOptions(data.players.find((item) => item.id === playerId) || { id: playerId })
+                .route,
+          );
+          void requestAndRenderProfile(currentlyLoadedRoutes, activeRoutePeriod);
         });
         const route = document.createElement('button');
         route.type = 'button';
@@ -517,9 +494,9 @@ const modules = await activateModules('world_map');
         route.setAttribute('aria-pressed', String(options.route));
         route.setAttribute(
           'aria-label',
-          `${options.route ? 'Скрыть' : 'Показать'} полосу пути игрока ${player.name || 'Игрок'}`,
+          `${options.route ? 'Убрать' : 'Выбрать'} маршрут игрока ${player.name || 'Игрок'} для загрузки`,
         );
-        route.title = 'Показать или скрыть цветную полосу пути';
+        route.title = 'Выбрать маршрут для загрузки за выбранный период';
         route.style.setProperty('--route-color', color);
         const line = document.createElement('i');
         line.className = 'route-sample';
@@ -542,10 +519,78 @@ const modules = await activateModules('world_map');
     buildNav($('players'));
     buildNav($('drawer-players'));
   };
+  const routeLoadButtonLabel = () => {
+    const periodTitle = { '24h': '24 часа', '7d': '7 дней', '30d': '30 дней' }[routePeriod];
+    return `Загрузить маршруты · ${periodTitle}`;
+  };
   const saveOptions = () => {
     try {
       localStorage.setItem('terraria-world-map-players', JSON.stringify(toggleState));
     } catch {}
+  };
+  const requestMapRenderProfile = async (routePlayerIds: string[], period = routePeriod) => {
+    if (!data?.world?.id) return null;
+    const requestVersion = ++profileRequestVersion;
+    const explorePlayerIds = modules['world_map.exploration']
+      ? (data.players || [])
+          .filter((player) => playerOptions(player).explore)
+          .map((player) => player.id)
+      : [];
+    const response = await fetchWithTimeout(
+      '/api/world-map/render-profile',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          world: String(data.world.id),
+          explore_players: explorePlayerIds,
+          route_players: routePlayerIds,
+          period,
+          full_map: fullMapEnabled,
+        }),
+        cache: 'no-store',
+      },
+      30000,
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const profile = await response.json();
+    if (requestVersion !== profileRequestVersion) return null;
+
+    const previousProfileId = renderProfileId;
+    renderProfileId = String(profile.id);
+    exploredPercent = Number(profile.explored_percent) || 0;
+    activeRoutePlayerIds = new Set(profile.route_player_ids || []);
+    routeHistories.clear();
+    for (const playerId of activeRoutePlayerIds) {
+      routeHistories.set(playerId, profile.routes?.[playerId] || []);
+    }
+    routePeriod = period;
+    activeRoutePeriod = period;
+    try {
+      localStorage.setItem('terraria-world-map-route-period', routePeriod);
+    } catch {}
+
+    if (previousProfileId !== renderProfileId) {
+      chunkLayerRenderer.clear();
+      requestVisibleChunkRender();
+    }
+    return profile;
+  };
+  const requestAndRenderProfile = async (routePlayerIds, period = activeRoutePeriod) => {
+    try {
+      const profile = await requestMapRenderProfile(routePlayerIds, period);
+      if (!profile) return;
+      await render();
+      exploredPercent = Number(profile.explored_percent) || 0;
+      if (data?.world) {
+        $('subtitle').textContent =
+          `${Number(data.world.width).toLocaleString('ru-RU')} × ${Number(data.world.height).toLocaleString('ru-RU')} тайлов — изучено ${Math.round(exploredPercent)}% карты`;
+      }
+    } catch (error) {
+      status(
+        `Не удалось обновить маску карты: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   };
   const updateMapImportOptions = () => {
     const select = $('map-import-player');
@@ -595,12 +640,11 @@ const modules = await activateModules('world_map');
   const requestVisibleChunkRender = () => {
     chunkLayerRenderer.requestRender();
   };
-  const updateChunkOwners = (width, height, size, players) => {
+  const ensureMapWorld = (width, height) => {
     const worldKey = `${data.world?.id}:${width}x${height}`;
     if (canvasWorld !== worldKey) {
       chunkLayerRenderer.clear();
       playerPaths.clear();
-      maskPlayersKey = '';
       routeKey = '';
       markerKey = '';
       entityRenderKey = '';
@@ -609,55 +653,10 @@ const modules = await activateModules('world_map');
       pylonRenderKey = '';
       spawnRenderKey = '';
       canvasWorld = worldKey;
-      maskCanvas = document.createElement('canvas');
-      maskCanvas.width = Math.ceil(width * MASK_SCALE);
-      maskCanvas.height = Math.ceil(height * MASK_SCALE);
-      if (fogCanvas.width !== maskCanvas.width || fogCanvas.height !== maskCanvas.height) {
-        fogCanvas.width = maskCanvas.width;
-        fogCanvas.height = maskCanvas.height;
-      }
-      fogCanvas.style.width = `${width * scale}px`;
-      fogCanvas.style.height = `${height * scale}px`;
-      explorationMask = new MapExplorationMask(maskCanvas, MASK_SCALE);
     }
-    chunkSize = size;
-    const previousOwners = chunkOwners,
-      nextOwners = new Map();
-    for (const chunk of data.base_chunks || []) {
-      const x = Number(chunk.x),
-        y = Number(chunk.y);
-      if (Number.isInteger(x) && Number.isInteger(y)) {
-        const key = `${x},${y}`;
-        const previous = previousOwners.get(key);
-        const keepPixelUpdates = previous?.base === chunk.data;
-        nextOwners.set(key, {
-          base: chunk.data,
-          overlays: [],
-          pixelUpdates: keepPixelUpdates ? previous.pixelUpdates : new Map(),
-          updateRevision: keepPixelUpdates ? previous.updateRevision || 0 : 0,
-        });
-      }
-    }
-    for (const player of players)
-      for (const chunk of player.chunks || []) {
-        const x = Number(chunk.x),
-          y = Number(chunk.y);
-        if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
-        const key = `${x},${y}`,
-          owner = nextOwners.get(key) || {
-            base: null,
-            overlays: [],
-            pixelUpdates: new Map(),
-            updateRevision: 0,
-          };
-        owner.overlays.push(chunk.data);
-        nextOwners.set(key, owner);
-      }
-    chunkOwners = nextOwners;
     mapRevision = Number(data.map_revision) || mapRevision;
   };
   const applyMapTileUpdates = (batches) => {
-    let changed = false;
     const changedPoints: Array<{ x: number; y: number }> = [];
     for (const batch of batches) {
       for (const update of batch.updates || []) {
@@ -675,39 +674,19 @@ const modules = await activateModules('world_map');
           color.length !== 4
         )
           continue;
-
-        const chunkX = Math.floor(x / chunkSize);
-        const chunkY = Math.floor(y / chunkSize);
-        const key = `${chunkX},${chunkY}`;
-        const owner = chunkOwners.get(key) || {
-          base: null,
-          overlays: [],
-          pixelUpdates: new Map(),
-          updateRevision: 0,
-        };
-        const pixelUpdates = owner.pixelUpdates || new Map();
-        const offset = (y % chunkSize) * chunkSize + (x % chunkSize);
-        pixelUpdates.set(offset, color as [number, number, number, number]);
-        owner.pixelUpdates = pixelUpdates;
-        owner.updateRevision = (owner.updateRevision || 0) + 1;
-        chunkOwners.set(key, owner);
         changedPoints.push({ x, y });
-        changed = true;
       }
     }
-
-    if (changed) {
-      chunkLayerRenderer.invalidateMapTiles(changedPoints);
-    }
+    chunkLayerRenderer.invalidateMapTiles(changedPoints);
   };
   const renderLiveLayers = () => {
     if (!data) return;
     const players = data.players || [];
+    const routedPlayers = players
+      .filter((player) => activeRoutePlayerIds.has(player.id) && playerOptions(player).route)
+      .map((player) => ({ ...player, positions: routeHistories.get(player.id) || [] }));
     const routed = modules['world_map.routes']
-      ? playerPaths.withPaths(
-          players.filter((player) => playerOptions(player).route),
-          data.world,
-        )
+      ? playerPaths.withPaths(routedPlayers, data.world)
       : [];
     const nextRouteKey = JSON.stringify(routed.map((player) => [player.id, player.pathKey]));
     if (nextRouteKey !== routeKey) {
@@ -765,8 +744,7 @@ const modules = await activateModules('world_map');
 
   const render = async () => {
     const width = Number(data.world?.width),
-      height = Number(data.world?.height),
-      size = Number(data.chunk_size || 64);
+      height = Number(data.world?.height);
     if (
       !Number.isInteger(width) ||
       !Number.isInteger(height) ||
@@ -776,36 +754,16 @@ const modules = await activateModules('world_map');
       height > 6000
     )
       throw new Error('Размер мира некорректен.');
-    updateChunkOwners(width, height, size, data.players || []);
-    const players = playerPaths.withPaths(data?.players || [], data.world),
+    ensureMapWorld(width, height);
+    const routeSourcePlayers = (data?.players || []).map((player) =>
+      activeRoutePlayerIds.has(player.id)
+        ? { ...player, positions: routeHistories.get(player.id) || [] }
+        : player,
+    );
+    const players = playerPaths.withPaths(routeSourcePlayers, data.world),
       explored = modules['world_map.exploration']
         ? players.filter((player) => playerOptions(player).explore)
-        : [],
-      routed = modules['world_map.routes']
-        ? players.filter((player) => playerOptions(player).route)
         : [];
-    const explorationImages = new Map();
-    await Promise.all(
-      explored
-        .filter((player) => player.exploration_url)
-        .map(async (player) => {
-          const bitmap = await getExplorationBitmap(player.exploration_url);
-          if (bitmap) explorationImages.set(player.id, bitmap);
-        }),
-    );
-    // Older telemetry lacks Main.worldSurface; the world spawn is a safe temporary boundary.
-    const worldSurface = data.world?.surface_y ?? data.world?.spawn_y;
-    const surfaceY = Number.isFinite(Number(worldSurface)) ? Number(worldSurface) : null;
-    const nextMaskPlayersKey = JSON.stringify([
-      surfaceY,
-      explored.map((player) => [player.id, player.pathKey, player.exploration_url]),
-    ]);
-    const rebuildMask = nextMaskPlayersKey !== maskPlayersKey;
-    if (rebuildMask && explorationMask) {
-      exploredPercent = explorationMask.rebuild(explored, explorationImages, surfaceY);
-      maskPlayersKey = nextMaskPlayersKey;
-      updateFogCanvas();
-    }
     drawOverview();
     renderLiveLayers();
     const pylonKey = modules['world_map.pylons'] ? JSON.stringify(data.pylons || []) : 'off';
@@ -842,8 +800,10 @@ const modules = await activateModules('world_map');
       const params = new URLSearchParams();
       if (query) params.set('world', query);
       params.set('tiles', '1');
+      params.set('positions', '0');
+      const requestedLiveSince = liveSince > 0 ? liveSince : Date.now() / 1000;
+      params.set('live_since', String(requestedLiveSince));
       if (data?.updated_at) params.set('since', String(data.updated_at));
-      if (liveSince > 0) params.set('live_since', String(liveSince));
       const response = await fetchWithTimeout(
         `/api/world-map${params.size ? `?${params}` : ''}`,
         { cache: 'no-store' },
@@ -851,6 +811,7 @@ const modules = await activateModules('world_map');
       );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const next = await response.json();
+      liveSince = Math.max(liveSince, requestedLiveSince);
       for (const player of next.players || []) {
         for (const point of player.positions || []) {
           liveSince = Math.max(liveSince, Number(point.time) || 0);
@@ -928,9 +889,32 @@ const modules = await activateModules('world_map');
       ]);
       if (!initial && key === renderKey) return;
       const hadMapData = Boolean(data);
+      const explorationProfileChanged =
+        !sameWorld ||
+        !data ||
+        (next.players || []).some((player) => {
+          const previous = (data.players || []).find((item) => item.id === player.id);
+          return previous?.exploration_url !== player.exploration_url;
+        });
+      if (!sameWorld) {
+        renderProfileId = null;
+        activeRoutePlayerIds = new Set();
+        routeHistories.clear();
+        chunkLayerRenderer.clear();
+      }
       data = next;
+      let profile = null;
+      if (explorationProfileChanged || !renderProfileId) {
+        const routeIds = sameWorld ? [...activeRoutePlayerIds] : [];
+        profile = await requestMapRenderProfile(routeIds, activeRoutePeriod);
+      }
       renderDebugPanel?.setData(next);
       await render();
+      if (profile) {
+        exploredPercent = Number(profile.explored_percent) || 0;
+        $('subtitle').textContent =
+          `${Number(data.world.width).toLocaleString('ru-RU')} × ${Number(data.world.height).toLocaleString('ru-RU')} тайлов — изучено ${Math.round(exploredPercent)}% карты`;
+      }
       if (mapVersionChanged) chunkLayerRenderer.invalidateVisibleTiles();
       if (!hadMapData || !sameWorld) focusMap();
       renderKey = key;
@@ -1266,7 +1250,7 @@ const modules = await activateModules('world_map');
       try {
         localStorage.setItem('terraria-world-map-show-full', String(fullMapEnabled));
       } catch {}
-      updateFogCanvas();
+      void requestAndRenderProfile([...activeRoutePlayerIds], activeRoutePeriod);
     });
     $('map-debug-toggle').addEventListener('change', (event) => {
       debugWindowEnabled = event.currentTarget.checked;

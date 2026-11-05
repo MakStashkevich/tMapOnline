@@ -189,6 +189,7 @@ class MapTilePyramid:
         tile_x: int,
         tile_y: int,
         chunks: Iterable[tuple[int, int, str]],
+        visibility_mask: bytes | None = None,
     ) -> bytes:
         """Return a PNG tile; higher levels cover larger world rectangles."""
         with self._lock:
@@ -291,6 +292,15 @@ class MapTilePyramid:
                         output_alpha,
                     )
             chunk.close()
+
+        mask_width = (world_width + 3) // 4
+        mask_height = (world_height + 3) // 4
+        if visibility_mask is not None and len(visibility_mask) == mask_width * mask_height:
+            for output_y, world_y in enumerate(sample_y):
+                mask_row = min(mask_height - 1, world_y // 4) * mask_width
+                for output_x, world_x in enumerate(sample_x):
+                    if visibility_mask[mask_row + min(mask_width - 1, world_x // 4)] == 0:
+                        output_pixels[output_x, output_y] = (5, 9, 13, 255)
 
         try:
             buffer = BytesIO()

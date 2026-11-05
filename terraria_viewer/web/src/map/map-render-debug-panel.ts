@@ -12,7 +12,6 @@ type RenderMetrics = {
   bitmapCacheEvictions?: number;
   pendingTileLoads?: number;
   failedRenderCount?: number;
-  extraCanvasBytes: number;
   spawnMarkerVisible: boolean;
 };
 
@@ -200,7 +199,7 @@ export class MapRenderDebugPanel {
       <div class="render-debug-section-title">Память</div>
       <div class="render-debug-rows">
         ${row('JavaScript', memoryValue)}
-        ${row('Холсты карты', `~${this.formatBytes(render.canvasBytes + render.extraCanvasBytes)}`)}
+        ${row('Холсты карты', `~${this.formatBytes(render.canvasBytes)}`)}
         ${row('Холсты чанков', String(render.visibleCanvases))}
         ${row('Декодированные тайлы', `${render.decodedChunkCount} — ~${this.formatBytes(render.decodedBitmapBytes ?? render.decodedChunkCount * 64 * 64 * 4)}`)}
         ${row('Кэш браузера', `${render.bitmapCacheHits ?? 0} попаданий, ${render.bitmapCacheMisses ?? 0} запросов, ${render.pendingTileLoads ?? 0} ожидает`)}
