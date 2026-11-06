@@ -126,12 +126,12 @@ internal sealed class WorldEntitySnapshotBuilder
             // Its Y coordinate also follows gfxOffY, which is important for
             // NPCs whose drawn sprite bobs or is vertically offset from the hitbox.
             return new Vector2(
-                npc.position.X + npc.width / 2,
-                npc.position.Y + npc.gfxOffY + npc.height / 2
+                npc.position.X + npc.netOffset.X + npc.width / 2,
+                npc.position.Y + npc.gfxOffY + npc.netOffset.Y + npc.height / 2
             );
         }
 
-        var position = npc.Center + new Vector2(0f, npc.gfxOffY);
+        var position = npc.Center + new Vector2(0f, npc.gfxOffY) + npc.netOffset;
         if (npc.type != NPCID.TheDestroyer)
             return position;
 

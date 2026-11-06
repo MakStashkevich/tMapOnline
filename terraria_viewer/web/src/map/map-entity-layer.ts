@@ -380,7 +380,9 @@ export class MapEntityLayer {
     const marker = document.createElement('div');
     marker.className = `entity-marker${entity.boss ? ' boss' : ''}`;
     marker.title = entity.name || (entity.boss ? 'Босс' : 'NPC');
-    marker.style.visibility = this.isPointVisible(motion.x, motion.y) ? 'visible' : 'hidden';
+    // Keep every live NPC marker mounted. Viewport culling can run before the
+    // map stage finishes its first layout and permanently hide late-loaded sprites.
+    marker.style.visibility = 'visible';
     sprite.className = 'entity-head-sprite';
     // Terraria draws NPC sprites flipped when spriteDirection is 1.
     if (entity.direction === 1) sprite.classList.add('facing-left');
