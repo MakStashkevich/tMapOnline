@@ -19,7 +19,6 @@ using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
 using Terraria.Map;
 using Terraria.Localization;
-using MonoMod.RuntimeDetour;
 
 namespace TerrariaTunnelTelemetry;
 
@@ -48,10 +47,9 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private WorldEntitySnapshotBuilder? _worldEntities;
     private PlayerMapChangeRevealer? _playerMapChangeRevealer;
     private WorldMapScanner? _mapScanner;
-    private Hook? _tileConversionHook;
-    private Hook? _wallConversionHook;
     private bool _loggedFirstSnapshot;
     private bool _loggedUpdateHook;
+    private bool _loggedTilePacketWarning;
     private readonly int _playerPositionIntervalTicks = ReadPositiveEnvironmentInteger(
         "TERRARIA_TELEMETRY_PLAYER_POSITION_INTERVAL_TICKS", 6);
     private readonly int _entityIntervalTicks = ReadPositiveEnvironmentInteger(
@@ -69,8 +67,6 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private long _serverTickCount;
     private long _nextSnapshotId;
 
-    private delegate bool OrigBlockConversion(int i, int j, int conversionType);
-
     public override void Load()
     {
         var portText = Environment.GetEnvironmentVariable("TERRARIA_TELEMETRY_PORT");
@@ -79,27 +75,6 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             : 38762;
 
         Terraria.On_MessageBuffer.GetData += CaptureClientPackets;
-        On_WorldGen.PlaceTile += CaptureTilePlacement;
-        On_WorldGen.KillTile += CaptureTileBreak;
-        On_WorldGen.PlaceWall += CaptureWallPlacement;
-        On_WorldGen.KillWall += CaptureWallBreak;
-        var conversionParameters = new[]
-        {
-            typeof(int), typeof(int), typeof(int)
-        };
-        var tileConvertMethod = typeof(TileLoader).GetMethod("Convert", conversionParameters)!;
-        var wallConvertMethod = typeof(WallLoader).GetMethod("Convert", conversionParameters)!;
-        var tileConversionHandler = GetType().GetMethod(
-            nameof(CaptureTileConversion),
-            BindingFlags.Instance | BindingFlags.NonPublic
-        )!;
-        var wallConversionHandler = GetType().GetMethod(
-            nameof(CaptureWallConversion),
-            BindingFlags.Instance | BindingFlags.NonPublic
-        )!;
-        _tileConversionHook = new Hook(tileConvertMethod, tileConversionHandler, this);
-        _wallConversionHook = new Hook(wallConvertMethod, wallConversionHandler, this);
-        On_Liquid.NetSendLiquid += CaptureLiquidChange;
         On_Player.Teleport += CapturePlayerTeleport;
         On_Player.KillMe += CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly += OnServerTick;
@@ -120,15 +95,6 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     public override void Unload()
     {
         Terraria.On_MessageBuffer.GetData -= CaptureClientPackets;
-        On_WorldGen.PlaceTile -= CaptureTilePlacement;
-        On_WorldGen.KillTile -= CaptureTileBreak;
-        On_WorldGen.PlaceWall -= CaptureWallPlacement;
-        On_WorldGen.KillWall -= CaptureWallBreak;
-        _tileConversionHook?.Dispose();
-        _tileConversionHook = null;
-        _wallConversionHook?.Dispose();
-        _wallConversionHook = null;
-        On_Liquid.NetSendLiquid -= CaptureLiquidChange;
         On_Player.Teleport -= CapturePlayerTeleport;
         On_Player.KillMe -= CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly -= OnServerTick;
@@ -154,77 +120,11 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             _teleportedSlots[self.whoAmI] = 1;
     }
 
-    private bool CaptureTilePlacement(
-        On_WorldGen.orig_PlaceTile orig, int i, int j, int type, bool mute, bool forced, int player, int style
-    )
-    {
-        var placed = orig(i, j, type, mute, forced, player, style);
-        if (placed)
-            RecordWorldTileChange(i, j);
-        return placed;
-    }
-
-    private void CaptureTileBreak(
-        On_WorldGen.orig_KillTile orig, int i, int j, bool fail, bool effectOnly, bool noItem
-    )
-    {
-        var existed = InWorld(i, j) && Main.tile[i, j].HasTile;
-        orig(i, j, fail, effectOnly, noItem);
-        if (existed && InWorld(i, j) && !Main.tile[i, j].HasTile)
-            RecordWorldTileChange(i, j);
-    }
-
-    private void CaptureWallPlacement(On_WorldGen.orig_PlaceWall orig, int i, int j, int type, bool mute)
-    {
-        var previousWall = InWorld(i, j) ? Main.tile[i, j].WallType : (ushort)0;
-        orig(i, j, type, mute);
-        if (InWorld(i, j) && Main.tile[i, j].WallType != previousWall)
-            RecordWorldTileChange(i, j);
-    }
-
-    private void CaptureWallBreak(On_WorldGen.orig_KillWall orig, int i, int j, bool fail)
-    {
-        var hadWall = InWorld(i, j) && Main.tile[i, j].WallType != WallID.None;
-        orig(i, j, fail);
-        if (hadWall && InWorld(i, j) && Main.tile[i, j].WallType == WallID.None)
-            RecordWorldTileChange(i, j);
-    }
-
-    private bool CaptureTileConversion(OrigBlockConversion orig, int i, int j, int conversionType)
-    {
-        var hadTile = InWorld(i, j) && Main.tile[i, j].HasTile;
-        var previousType = hadTile ? Main.tile[i, j].TileType : (ushort)0;
-        var converted = orig(i, j, conversionType);
-        var hasTile = InWorld(i, j) && Main.tile[i, j].HasTile;
-        var currentType = hasTile ? Main.tile[i, j].TileType : (ushort)0;
-        if (converted && Main.netMode == NetmodeID.Server
-            && (hadTile != hasTile || previousType != currentType))
-            RecordWorldTileChange(i, j);
-        return converted;
-    }
-
-    private bool CaptureWallConversion(OrigBlockConversion orig, int i, int j, int conversionType)
-    {
-        var previousWall = InWorld(i, j) ? Main.tile[i, j].WallType : (ushort)0;
-        var converted = orig(i, j, conversionType);
-        var currentWall = InWorld(i, j) ? Main.tile[i, j].WallType : (ushort)0;
-        if (converted && Main.netMode == NetmodeID.Server && previousWall != currentWall)
-            RecordWorldTileChange(i, j);
-        return converted;
-    }
-
     private void RecordWorldTileChange(int x, int y)
     {
         if (WorldGen.IsGeneratingHardMode)
             _mapScanner?.MarkConvertedTileChanged(x, y);
         else
-            _mapScanner?.MarkTileChanged(x, y);
-    }
-
-    private void CaptureLiquidChange(On_Liquid.orig_NetSendLiquid orig, int x, int y)
-    {
-        orig(x, y);
-        if (Main.netMode == NetmodeID.Server && !WorldGen.gen)
             _mapScanner?.MarkTileChanged(x, y);
     }
 
@@ -599,6 +499,11 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var slot = messageBuffer.whoAmI;
         if (slot < 0 || slot >= Netplay.Clients.Length)
             return;
+        if (messageType == MessageID.TileManipulation)
+        {
+            CaptureTileManipulationPacket(messageBuffer, start, length);
+            return;
+        }
         if (messageType == 1)
         {
             _clientUuids.TryRemove(slot, out _);
@@ -632,6 +537,32 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         catch (Exception exception)
         {
             Mod.Logger.Warn($"Could not decode ClientUUID packet for player slot {slot}: {exception.GetType().Name}.");
+        }
+    }
+
+    private void CaptureTileManipulationPacket(MessageBuffer messageBuffer, int start, int length)
+    {
+        if (start < 0 || length < 8 || start + length > messageBuffer.readBuffer.Length)
+            return;
+
+        try
+        {
+            using var stream = new MemoryStream(messageBuffer.readBuffer, start + 1, length - 1, writable: false);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
+            _ = reader.ReadByte(); // Tile manipulation action.
+            var tileX = reader.ReadInt16();
+            var tileY = reader.ReadInt16();
+            RecordWorldTileChange(tileX, tileY);
+        }
+        catch (Exception exception)
+        {
+            if (!_loggedTilePacketWarning)
+            {
+                _loggedTilePacketWarning = true;
+                Mod.Logger.Warn(
+                    $"Could not decode tile-manipulation packet for map refresh: {exception.GetType().Name}."
+                );
+            }
         }
     }
 
