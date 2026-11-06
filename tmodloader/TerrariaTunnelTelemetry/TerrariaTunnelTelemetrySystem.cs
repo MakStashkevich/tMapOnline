@@ -78,6 +78,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             : 38762;
 
         Terraria.On_MessageBuffer.GetData += CaptureClientPackets;
+        Terraria.Net.On_NetManager.Read += CapturePlayerMapPingModule;
         On_Player.Teleport += CapturePlayerTeleport;
         On_Player.KillMe += CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly += OnServerTick;
@@ -99,6 +100,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     public override void Unload()
     {
         Terraria.On_MessageBuffer.GetData -= CaptureClientPackets;
+        Terraria.Net.On_NetManager.Read -= CapturePlayerMapPingModule;
         On_Player.Teleport -= CapturePlayerTeleport;
         On_Player.KillMe -= CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly -= OnServerTick;
@@ -180,6 +182,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             return;
 
         _pendingMapPings.Enqueue((commandId, x, y));
+        Mod.Logger.Info($"Received web map ping command {commandId} at ({x:0.##}, {y:0.##}) pixels.");
     }
 
     private void BroadcastPendingMapPings()
@@ -193,7 +196,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 continue;
             }
 
-            NetManager.Instance.Broadcast(NetPingModule.Serialize(new Vector2(ping.X, ping.Y)));
+            var packet = NetPingModule.Serialize(new Vector2(ping.X, ping.Y));
+            NetManager.Instance.Broadcast(packet);
             _activeMapPings.Add(new MapPingEvent(
                 ping.CommandId,
                 "Веб",
@@ -203,6 +207,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 "web",
                 Main.worldID
             ));
+            Mod.Logger.Info($"Broadcast web map ping command {ping.CommandId} to connected players.");
         }
     }
 
@@ -211,9 +216,11 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         while (_pendingPlayerMapPings.TryDequeue(out var ping))
         {
+            // NetPingModule carries map coordinates in tiles. The web sends
+            // pixels and is converted to tiles before serialization above.
             if (ping.Slot < 0 || ping.Slot >= Main.player.Length
                 || ping.X < 0 || ping.Y < 0
-                || ping.X >= Main.maxTilesX * 16f || ping.Y >= Main.maxTilesY * 16f)
+                || ping.X >= Main.maxTilesX || ping.Y >= Main.maxTilesY)
                 continue;
 
             var playerName = _sessions.TryGetValue(ping.Slot, out var session)
@@ -222,8 +229,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
             _activeMapPings.Add(new MapPingEvent(
                 Guid.NewGuid().ToString("N"),
                 playerName,
-                ping.X / 16f,
-                ping.Y / 16f,
+                ping.X,
+                ping.Y,
                 (long)ping.Timestamp,
                 "player",
                 Main.worldID
@@ -555,11 +562,6 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var slot = messageBuffer.whoAmI;
         if (slot < 0 || slot >= Netplay.Clients.Length)
             return;
-        if (_mapPingsFromPlayersToWeb && messageType == MessageID.NetModules)
-        {
-            CapturePlayerMapPing(messageBuffer, slot, start, length);
-            return;
-        }
         if (messageType == MessageID.TileManipulation)
         {
             CaptureTileManipulationPacket(messageBuffer, start, length);
@@ -601,29 +603,54 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         }
     }
 
-    private void CapturePlayerMapPing(MessageBuffer messageBuffer, int slot, int start, int length)
+    private void CapturePlayerMapPingModule(
+        Terraria.Net.On_NetManager.orig_Read orig,
+        NetManager netManager,
+        BinaryReader reader,
+        int slot,
+        int readLength
+    )
     {
-        // NetManager has already handled the packet and relayed it to the other
-        // clients. Read only the vanilla ping module payload for web telemetry.
-        if (start < 0 || length < 11 || start + length > messageBuffer.readBuffer.Length)
+        if (!_mapPingsFromPlayersToWeb || Main.netMode != NetmodeID.Server
+            || slot < 0 || slot >= Netplay.Clients.Length)
+        {
+            orig(netManager, reader, slot, readLength);
             return;
+        }
 
+        var stream = reader.BaseStream;
+        var originalPosition = stream.Position;
+        float x;
+        float y;
         try
         {
-            using var stream = new MemoryStream(messageBuffer.readBuffer, start + 1, length - 1, writable: false);
-            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
             if (reader.ReadUInt16() != NetManager.Instance.GetId<NetPingModule>())
+            {
+                stream.Position = originalPosition;
+                orig(netManager, reader, slot, readLength);
                 return;
+            }
 
-            var x = reader.ReadSingle();
-            var y = reader.ReadSingle();
-            if (float.IsFinite(x) && float.IsFinite(y))
-                _pendingPlayerMapPings.Enqueue((slot, x, y, DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+            x = reader.ReadSingle();
+            y = reader.ReadSingle();
         }
         catch (Exception exception)
         {
-            Mod.Logger.Debug($"Could not decode player map ping packet: {exception.GetType().Name}.");
+            stream.Position = originalPosition;
+            Mod.Logger.Warn($"Could not inspect NetPingModule from player slot {slot}: {exception.GetType().Name}.");
+            orig(netManager, reader, slot, readLength);
+            return;
         }
+
+        // Restore the packet reader before vanilla relays the module to the other clients.
+        stream.Position = originalPosition;
+        orig(netManager, reader, slot, readLength);
+
+        if (!float.IsFinite(x) || !float.IsFinite(y))
+            return;
+
+        _pendingPlayerMapPings.Enqueue((slot, x, y, DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        Mod.Logger.Info($"Captured player map ping from slot {slot} at ({x:0.##}, {y:0.##}) tiles.");
     }
 
     private void CaptureTileManipulationPacket(MessageBuffer messageBuffer, int start, int length)
