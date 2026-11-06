@@ -26,8 +26,22 @@ class PlayerHistoryMixin(StoreMixinContract):
         try:
             loaded = as_json_array(json.loads(self._events_file.read_text(encoding="utf-8")))
             self._events = [self._normalize_event(as_json_object(event)) for event in loaded if isinstance(event, dict)]
+            if self._prune_events_locked(time.time()):
+                self._save_events_locked()
         except (OSError, ValueError, TypeError):
             self._events = []
+
+    def _prune_events_locked(self, now: float) -> bool:
+        original_count = len(self._events)
+        if self._event_retention_seconds > 0:
+            cutoff = now - self._event_retention_seconds
+            self._events = [
+                event for event in self._events
+                if float(event.get("time", 0) or 0) >= cutoff
+            ]
+        if len(self._events) > self._event_max_entries:
+            self._events = self._events[-self._event_max_entries:]
+        return len(self._events) != original_count
 
     @classmethod
     def _normalize_event(cls, event: dict[str, Any]) -> dict[str, Any]:

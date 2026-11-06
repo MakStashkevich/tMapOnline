@@ -42,7 +42,6 @@ TERRARIA_CLIENT_IMAGES = Path(os.environ.get(
     str(HOME / "Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Content/Images"),
 ))
 PLAYER_MOVEMENTS_DIR = HOME / "Library/Application Support/TerrariaTunnel/player-movements"
-BOSS_CACHE_DIR = HOME / "Library/Application Support/TerrariaTunnel/boss-cache"
 HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
 HISTORY_SAMPLE_INTERVAL = 60
 AVATAR_RENDERER_VERSION = 7
@@ -53,7 +52,7 @@ GAME_PORT = 7777
 WORLD_MAP_CHUNK_SIZE = 64
 WORLD_MAP_EXPLORATION_DIR = HOME / "Library/Application Support/TerrariaTunnel/world-exploration"
 __all__ = [
-    "AVATAR_RENDERER_VERSION", "BOSS_CACHE_DIR", "EVENTS_FILE", "GAME_LOG", "GAME_PORT",
+    "AVATAR_RENDERER_VERSION", "EVENTS_FILE", "GAME_LOG", "GAME_PORT",
     "HISTORY_FILE", "HISTORY_RETENTION_SECONDS", "HISTORY_SAMPLE_INTERVAL", "HOME",
     "MAP_SPRITES_DIR", "METRICS_FILE", "NPC_SPRITES_DIR", "NPC_TEXTURES_DIR",
     "PLAYER_AVATARS_DIR", "PLAYER_MOVEMENTS_DIR", "PLAYER_NAME_PLACEHOLDERS",
@@ -82,6 +81,8 @@ class StoreMixinContract(Protocol):
     _history_file: Path
     _players_file: Path
     _death_retention_seconds: int
+    _event_retention_seconds: int
+    _event_max_entries: int
     _metrics_file: Path
     _avatars_dir: Path
     _npc_sprites_dir: Path
@@ -90,8 +91,6 @@ class StoreMixinContract(Protocol):
     _movements_dir: Path
     _exploration_dir: Path
     _world_map_cache_file: Path
-    _boss_cache_dir: Path
-    _boss_cache_lock: Any
     _sprite_renderer_lock: Any
     _player_sprite_renderer: Any
     _npc_sprite_renderer: Any
@@ -143,6 +142,7 @@ class StoreMixinContract(Protocol):
 
     def _append_event_locked(self, *args: Any, **kwargs: Any) -> Any: ...
     def _save_events_locked(self, *args: Any, **kwargs: Any) -> Any: ...
+    def _prune_events_locked(self, now: float) -> bool: ...
     def _save_history_locked(self, *args: Any, **kwargs: Any) -> Any: ...
     def _save_players_locked(self, *args: Any, **kwargs: Any) -> Any: ...
     def _prune_player_deaths_locked(self, *args: Any, **kwargs: Any) -> Any: ...

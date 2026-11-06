@@ -38,12 +38,13 @@ def _make_store(config: dict[str, Any]) -> StatusStore:
         metrics_file=data / "server-metrics.json",
         avatars_dir=data / "player-avatars",
         movements_dir=data / "player-movements",
-        boss_cache_dir=data / "boss-cache",
         exploration_dir=data / "world-exploration",
         npc_sprites_dir=data / "npc-sprites",
         npc_textures_dir=data / "npc-textures",
         map_sprites_dir=data / "map-sprites",
         death_retention_seconds=config["storage"]["death_retention_seconds"],
+        event_retention_seconds=config["storage"]["event_retention_seconds"],
+        event_max_entries=config["storage"]["event_max_entries"],
     )
     store.set_server_info(
         telemetry_intervals={

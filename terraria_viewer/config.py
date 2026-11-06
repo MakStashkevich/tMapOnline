@@ -19,6 +19,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "storage": {
         "data_dir": "~/Library/Application Support/TerrariaTunnel",
         "death_retention_seconds": 3600,
+        "event_retention_seconds": 2592000,
+        "event_max_entries": 5000,
     },
     # Each category has its own cadence in Terraria server ticks.
     "telemetry": {
@@ -92,6 +94,12 @@ def load_config(path: str | Path) -> dict[str, Any]:
     death_retention = config["storage"].get("death_retention_seconds")
     if type(death_retention) is not int or death_retention < 0:
         raise ValueError("storage.death_retention_seconds must be a non-negative integer")
+    event_retention = config["storage"].get("event_retention_seconds")
+    if type(event_retention) is not int or event_retention < 0:
+        raise ValueError("storage.event_retention_seconds must be a non-negative integer")
+    event_max_entries = config["storage"].get("event_max_entries")
+    if type(event_max_entries) is not int or event_max_entries < 1:
+        raise ValueError("storage.event_max_entries must be a positive integer")
     for key in (
         "player_position_interval_ticks",
         "entity_interval_ticks",

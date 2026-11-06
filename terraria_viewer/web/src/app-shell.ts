@@ -12,7 +12,10 @@ class ViewerApplication {
       description: 'Исследование мира, сканирование и объекты карты.',
     },
     players: { title: 'Игроки', description: 'Онлайн, история игроков и игровые сессии.' },
-    bosses: { title: 'Боссы и прогресс', description: 'Активные боссы, победы и прогресс мира.' },
+    bosses: {
+      title: 'Боссы',
+      description: 'Активные боссы мира. Нажмите, чтобы открыть страницу Terraria Wiki.',
+    },
     server: { title: 'Сервер', description: 'Состояние Terraria, туннеля и соединения.' },
     activity: {
       title: 'Нагрузка и события',

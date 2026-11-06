@@ -35,12 +35,6 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private object[] _cachedNpcs = Array.Empty<object>();
     private object[] _cachedCoins = Array.Empty<object>();
     private object[] _cachedPylons = Array.Empty<object>();
-    private string[] _cachedActiveBosses = Array.Empty<string>();
-    private object[] _cachedBossDiagnostics = Array.Empty<object>();
-    private string[] _cachedDefeatedBosses = Array.Empty<string>();
-    private System.Collections.Generic.Dictionary<string, bool?> _cachedCalamityBosses = new();
-    private System.Collections.Generic.Dictionary<string, int> _cachedBossDefeatCounts = new();
-    private bool _cachedCalamityAvailable;
     private TelemetryStreamServer? _telemetryStream;
     private MapTileNameCatalog? _mapTileNames;
     private MapTileDataCapture? _mapTileData;
@@ -314,29 +308,6 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
 
     private void UpdateCachedEntities()
     {
-        var progress = BossProgressSnapshotReader.ReadCalamityBossProgress();
-        _cachedCalamityAvailable = progress.Available;
-        _cachedCalamityBosses = progress.Bosses;
-        _cachedDefeatedBosses = BossProgressSnapshotReader.DefeatedBosses(progress.Bosses);
-        _cachedBossDefeatCounts = BossVictoryTracker.SnapshotCounts();
-        _cachedActiveBosses = Main.npc
-            .Where(npc => npc.active && npc.boss)
-            .Select(MapTileNameCatalog.GetLocalizedNpcName)
-            .Distinct()
-            .ToArray();
-        _cachedBossDiagnostics = Main.npc
-            .Where(npc => npc.active && npc.boss)
-            .Select(npc => (object)new
-            {
-                slot = npc.whoAmI,
-                type = npc.type,
-                name = MapTileNameCatalog.GetLocalizedNpcName(npc),
-                mod = npc.ModNPC?.Mod?.Name,
-                modName = npc.ModNPC?.Name,
-                life = npc.life,
-                lifeMax = npc.lifeMax
-            })
-            .ToArray();
         _cachedNpcs = _worldEntities!.CaptureActiveNpcs();
         _cachedCoins = _worldEntities.CaptureDroppedCoins();
         var pylons = _worldEntities.CapturePylons();
@@ -426,17 +397,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 eclipse = Main.eclipse,
                 raining = Main.raining,
                 slimeRain = Main.slimeRain,
-                activeBosses = _cachedActiveBosses,
-                bossDiagnostics = _cachedBossDiagnostics,
                 activeNpcs = _cachedNpcs,
                 droppedCoins = _cachedCoins,
-                defeatedBosses = _cachedDefeatedBosses,
-                bossDefeatCounts = _cachedBossDefeatCounts,
-                bossStatus = new
-                {
-                    calamityAvailable = _cachedCalamityAvailable,
-                    calamityBosses = _cachedCalamityBosses
-                }
             },
             pylons = _cachedPylons,
             baseMapTileUpdates = includeBaseMapTileUpdates || _mapScanner?.HasUnacknowledgedTileChanges == true

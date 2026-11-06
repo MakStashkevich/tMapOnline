@@ -346,7 +346,6 @@ class MonitoringMixin(StoreMixinContract):
                     for key in (
                         "world", "world_width", "world_height", "version",
                         "telemetry_connected", "telemetry_updated_at", "map_scan",
-                        "active_bosses", "boss_defeat_counts",
                     )
                 },
                 "host_metrics": {
@@ -386,21 +385,21 @@ class MonitoringMixin(StoreMixinContract):
                 }
 
             if section == "bosses":
-                keys = (
-                    "boss_status", "active_bosses", "defeated_bosses", "boss_defeat_counts",
-                    "game_mode", "crimson", "hardmode", "version", "world",
-                )
+                bosses = [
+                    npc.to_payload()
+                    for npc in self._active_npcs
+                    if (npc.is_boss or npc.boss_head_slot >= 0) and npc.icon_url
+                ]
                 return {
                     "section": section,
                     "updated_at": now,
-                    "server_info": {key: self._server_info.get(key) for key in keys},
+                    "bosses": bosses,
                 }
 
             if section == "server":
                 server_info_keys = (
                     "world", "world_width", "world_height", "version", "telemetry_connected",
-                    "telemetry_updated_at", "boss_status", "active_bosses", "defeated_bosses",
-                    "boss_defeat_counts", "game_mode", "crimson", "hardmode", "day",
+                    "telemetry_updated_at", "game_mode", "crimson", "hardmode", "day",
                     "world_time", "game_time",
                 )
                 return {

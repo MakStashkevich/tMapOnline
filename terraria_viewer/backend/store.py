@@ -33,12 +33,13 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         metrics_file: Path = METRICS_FILE,
         avatars_dir: Path = PLAYER_AVATARS_DIR,
         movements_dir: Path = PLAYER_MOVEMENTS_DIR,
-        boss_cache_dir: Path = BOSS_CACHE_DIR,
         exploration_dir: Path = WORLD_MAP_EXPLORATION_DIR,
         npc_sprites_dir: Path = NPC_SPRITES_DIR,
         npc_textures_dir: Path = NPC_TEXTURES_DIR,
         map_sprites_dir: Path = MAP_SPRITES_DIR,
         death_retention_seconds: int = 3600,
+        event_retention_seconds: int = 2592000,
+        event_max_entries: int = 5000,
     ) -> None:
         self._lock = threading.Lock()
         self._live_update_condition = threading.Condition()
@@ -47,6 +48,8 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._history_file = history_file
         self._players_file = players_file
         self._death_retention_seconds = max(0, int(death_retention_seconds))
+        self._event_retention_seconds = max(0, int(event_retention_seconds))
+        self._event_max_entries = max(1, int(event_max_entries))
         self._metrics_file = metrics_file
         self._avatars_dir = avatars_dir
         self.avatar_directory = avatars_dir
@@ -71,10 +74,6 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         )
         self._map_render_profiles = MapRenderProfileStore()
         self._map_tile_generation_lock = threading.BoundedSemaphore(2)
-        self._boss_cache_dir = boss_cache_dir
-        self.boss_cache_directory = boss_cache_dir
-        self._boss_cache_lock = threading.Lock()
-        self.boss_cache_lock = self._boss_cache_lock
         self._events: list[dict[str, Any]] = []
         self._history: list[dict[str, Any]] = []
         self._players: dict[str, dict[str, Any]] = {}

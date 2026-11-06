@@ -190,10 +190,6 @@ class LiveTelemetryMixin(StoreMixinContract):
             eclipse=world.get("eclipse"),
             raining=world.get("raining"),
             slime_rain=world.get("slimeRain"),
-            active_bosses=world.get("activeBosses"),
-            defeated_bosses=world.get("defeatedBosses"),
-            boss_defeat_counts=world.get("bossDefeatCounts"),
-            boss_status=world.get("bossStatus"),
             telemetry_updated_at=telemetry.generated_at,
         )
         self.notify_live_update()
@@ -433,6 +429,7 @@ class LiveTelemetryMixin(StoreMixinContract):
             "message": " ".join(message.strip().split())[:400],
             "severity": self._severity(source, message),
         })
+        self._prune_events_locked(now)
 
     def record_error(self, source: str, message: str) -> None:
         message = " ".join(message.strip().split())[:400]

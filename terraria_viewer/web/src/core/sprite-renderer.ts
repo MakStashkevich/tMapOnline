@@ -1,4 +1,5 @@
 const imagePromises = new Map<string, Promise<HTMLImageElement | null>>();
+const SPRITE_LOAD_RETRY_DELAYS_MS = [150, 400, 900];
 
 const TEAM_COLORS: Record<number, string> = {
   0: '#ffffff',
@@ -15,20 +16,53 @@ export function loadSprite(source: string): Promise<HTMLImageElement | null> {
   const cached = imagePromises.get(source);
   if (cached) return cached;
 
-  const request = new Promise<HTMLImageElement | null>((resolve) => {
-    const image = new Image();
-    image.decoding = 'async';
-    image.onload = () => resolve(image.naturalWidth > 0 ? image : null);
-    image.onerror = () => resolve(null);
-    image.src = source;
-    if (image.complete && image.naturalWidth > 0) resolve(image);
-  });
+  const request = loadSpriteWithRetry(source);
   imagePromises.set(source, request);
   void request.then((image) => {
     // Do not cache failures: a transient request error should not hide a sprite forever.
     if (!image && imagePromises.get(source) === request) imagePromises.delete(source);
   });
   return request;
+}
+
+async function loadSpriteWithRetry(source: string): Promise<HTMLImageElement | null> {
+  for (let attempt = 0; attempt <= SPRITE_LOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+    const image = await loadImage(source, attempt);
+    if (image) return image;
+
+    const retryDelay = SPRITE_LOAD_RETRY_DELAYS_MS[attempt];
+    if (retryDelay !== undefined) await delay(retryDelay);
+  }
+
+  return null;
+}
+
+function loadImage(source: string, attempt: number): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => resolve(image.naturalWidth > 0 ? image : null);
+    image.onerror = () => resolve(null);
+    image.src = retryUrl(source, attempt);
+
+    if (image.complete && image.naturalWidth > 0) resolve(image);
+  });
+}
+
+function retryUrl(source: string, attempt: number): string {
+  if (attempt === 0 || source.startsWith('data:')) return source;
+
+  try {
+    const url = new URL(source, window.location.href);
+    url.searchParams.set('_sprite_retry', String(attempt));
+    return url.href;
+  } catch {
+    return source;
+  }
+}
+
+function delay(durationMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, durationMs));
 }
 
 export function playerOutlineColor(team: number | null | undefined): string {

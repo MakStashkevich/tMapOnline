@@ -17,6 +17,8 @@ terraria:
 storage:
   data_dir: ~/Library/Application Support/TerrariaTunnel
   death_retention_seconds: 3600
+  event_retention_seconds: 2592000
+  event_max_entries: 5000
 
 telemetry:
   player_position_interval_ticks: 1

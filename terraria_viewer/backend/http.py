@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import gzip
 import mimetypes
 import re
 import threading
 import time
-import urllib.error
-import urllib.request
 import struct
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import SplitResult, parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .store import GAME_LOG, WORLD_MAP_FILE, StatusStore
 from .store_common import is_valid_png
@@ -283,14 +280,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(404, b"invalid image\n", "text/plain; charset=utf-8")
                 return
             self._send(200, body, "image/png", cache_control="public, max-age=31536000, immutable")
-        elif path == "/api/wiki-cache":
-            raw_url = parse_qs(request.query).get("url", [""])[0]
-            try:
-                body, content_type, max_age = self._cached_wiki_resource(raw_url)
-            except (ValueError, urllib.error.URLError, TimeoutError) as error:
-                self._send(502, str(error).encode("utf-8"), "text/plain; charset=utf-8", cache_control="no-store")
-                return
-            self._send(200, body, content_type, cache_control=f"public, max-age={max_age}")
         elif path in {"/world-map", "/world-map.html", "/debug"}:
             if not page_enabled({"site": self.site_config}, "world_map"):
                 self._send(404, b"page disabled\n", "text/plain; charset=utf-8")
@@ -469,57 +458,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(400, str(error).encode("utf-8"), "text/plain; charset=utf-8")
             return
         self._send(200, json.dumps(result, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8", cache_control="no-store")
-
-    def _cached_wiki_resource(self, raw_url: str) -> tuple[bytes, str, int]:
-        parsed = urlsplit(raw_url)
-        hostname = parsed.hostname or ""
-        if parsed.scheme != "https" or not (hostname == "wiki.gg" or hostname.endswith(".wiki.gg")):
-            raise ValueError("Разрешены только HTTPS-ресурсы wiki.gg.")
-        if parsed.username or parsed.password or not parsed.path.startswith(("/ru/api.php", "/images/", "/ru/wiki/")):
-            raise ValueError("Недопустимый адрес ресурса вики.")
-        cache_seconds = 30 * 24 * 60 * 60 if parsed.path.startswith("/images/") else 7 * 24 * 60 * 60
-        digest = hashlib.sha256(raw_url.encode("utf-8")).hexdigest()
-        body_path = self.store.boss_cache_directory / f"{digest}.body"
-        meta_path = self.store.boss_cache_directory / f"{digest}.json"
-        now = time.time()
-        with self.store.boss_cache_lock:
-            try:
-                metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-                cached_body = body_path.read_bytes()
-                age = max(0, int(now - float(metadata["stored_at"])))
-                if age < cache_seconds:
-                    return cached_body, str(metadata["content_type"]), max(60, cache_seconds - age)
-            except (OSError, ValueError, TypeError, KeyError):
-                metadata = None
-                cached_body = None
-            req = urllib.request.Request(raw_url, headers={"User-Agent": "TerrariaTunnelDashboard/1.0"})
-            try:
-                with urllib.request.urlopen(req, timeout=12) as response:
-                    final = cast(SplitResult, urlsplit(response.geturl()))
-                    final_host: str = final.hostname or ""
-                    if final.scheme != "https" or not (final_host == "wiki.gg" or final_host.endswith(".wiki.gg")):
-                        raise ValueError("Вики перенаправила на недопустимый адрес.")
-                    content_type = response.headers.get_content_type()
-                    if parsed.path.startswith("/images/"):
-                        if not content_type.startswith("image/"):
-                            raise ValueError("Вики вернула не изображение.")
-                    elif content_type not in {"application/json", "text/html", "text/plain"}:
-                        raise ValueError("Вики вернула неподдерживаемый формат.")
-                    body = response.read(12 * 1024 * 1024 + 1)
-                    if len(body) > 12 * 1024 * 1024:
-                        raise ValueError("Ресурс вики слишком большой.")
-            except (urllib.error.URLError, TimeoutError):
-                if cached_body is not None and metadata:
-                    return cached_body, str(metadata["content_type"]), 300
-                raise
-            self.store.boss_cache_directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            temporary_body = body_path.with_suffix(".body.tmp")
-            temporary_meta = meta_path.with_suffix(".json.tmp")
-            temporary_body.write_bytes(body)
-            temporary_meta.write_text(json.dumps({"stored_at": now, "content_type": content_type}), encoding="utf-8")
-            temporary_body.replace(body_path)
-            temporary_meta.replace(meta_path)
-            return body, content_type, cache_seconds
 
     def _send(
         self,
