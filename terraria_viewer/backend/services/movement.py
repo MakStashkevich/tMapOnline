@@ -269,15 +269,40 @@ class MovementMixin(StoreMixinContract):
                 if chunk_changed:
                     changed_chunks[key] = target
 
-        if not changed_chunks:
-            return False
         for key, target in changed_chunks.items():
             chunks[key] = base64.b64encode(zlib.compress(target, level=1)).decode("ascii")
+        light_changed = False
         if chunk_field == "base_map_chunks":
             updated_at = time.time()
             times = world_data.setdefault("base_map_chunk_times", {})
             for key in changed_chunks:
                 times[key] = updated_at
+            light_sources = world_data.setdefault("light_sources", {})
+            if isinstance(light_sources, dict) and isinstance(capture.get("lightSources"), list):
+                chunk_left, chunk_top = x, y
+                chunk_right, chunk_bottom = x + width, y + height
+                for coordinate in list(light_sources):
+                    try:
+                        light_x, light_y = (int(value) for value in coordinate.split(",", 1))
+                    except (AttributeError, TypeError, ValueError):
+                        continue
+                    if chunk_left <= light_x < chunk_right and chunk_top <= light_y < chunk_bottom:
+                        if light_sources.pop(coordinate, None) is not None:
+                            light_changed = True
+                for raw_point in capture["lightSources"]:
+                    if not isinstance(raw_point, (list, tuple)) or len(raw_point) != 2:
+                        continue
+                    try:
+                        light_x, light_y = int(raw_point[0]), int(raw_point[1])
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if chunk_left <= light_x < chunk_right and chunk_top <= light_y < chunk_bottom:
+                        coordinate = f"{light_x},{light_y}"
+                        if light_sources.get(coordinate) != 1:
+                            light_sources[coordinate] = 1
+                            light_changed = True
+        if not changed_chunks and not light_changed:
+            return False
         world_data["map_chunk_size"] = chunk_size
         world_data["map_updated_at"] = time.time()
         return True
@@ -361,7 +386,7 @@ class MovementMixin(StoreMixinContract):
         try:
             raw = zlib.decompress(base64.b64decode(str(capture["data"]), validate=True))
             count = int(capture.get("count", 0))
-            if count < 1 or count > 512 or len(raw) != count * 12:
+            if count < 1 or count > 512 or len(raw) not in {count * 12, count * 13}:
                 return False
         except (KeyError, TypeError, ValueError, OverflowError, zlib.error):
             return False
@@ -397,8 +422,10 @@ class MovementMixin(StoreMixinContract):
         pixel_chunks: dict[str, bytearray] = {}
         info_chunks: dict[str, bytearray] = {}
         updates: list[dict[str, Any]] = []
+        record_size = len(raw) // count
+        light_sources = world_data.setdefault("light_sources", {})
         for index in range(count):
-            offset = index * 12
+            offset = index * record_size
             tile_x, tile_y = struct.unpack_from("<HH", raw, offset)
             if tile_x >= int(world_data.get("width", 0) or 0) or tile_y >= int(world_data.get("height", 0) or 0):
                 continue
@@ -412,13 +439,24 @@ class MovementMixin(StoreMixinContract):
             tile_info = raw[offset + 8:offset + 12]
             pixels = pixel_chunks[key]
             tile_data = info_chunks[key]
+            light_source_changed = False
+            if record_size == 13 and isinstance(light_sources, dict):
+                coordinate = f"{tile_x},{tile_y}"
+                light_source_changed = bool(light_sources.get(coordinate)) != bool(raw[offset + 12])
             if (
                 bytes(pixels[local_offset:local_offset + 4]) == color
                 and bytes(tile_data[local_offset:local_offset + 4]) == tile_info
+                and not light_source_changed
             ):
                 continue
             pixels[local_offset:local_offset + 4] = color
             tile_data[local_offset:local_offset + 4] = tile_info
+            if record_size == 13 and isinstance(light_sources, dict):
+                coordinate = f"{tile_x},{tile_y}"
+                if raw[offset + 12]:
+                    light_sources[coordinate] = 1
+                else:
+                    light_sources.pop(coordinate, None)
             updates.append({"x": tile_x, "y": tile_y, "color": list(color)})
 
         if not updates:

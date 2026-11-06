@@ -299,8 +299,17 @@ class MapTilePyramid:
             for output_y, world_y in enumerate(sample_y):
                 mask_row = min(mask_height - 1, world_y // 4) * mask_width
                 for output_x, world_x in enumerate(sample_x):
-                    if visibility_mask[mask_row + min(mask_width - 1, world_x // 4)] == 0:
+                    visibility = visibility_mask[mask_row + min(mask_width - 1, world_x // 4)]
+                    if visibility == 0:
                         output_pixels[output_x, output_y] = (5, 9, 13, 255)
+                    elif visibility < 255:
+                        color = output_pixels[output_x, output_y]
+                        output_pixels[output_x, output_y] = (
+                            color[0] * visibility // 255,
+                            color[1] * visibility // 255,
+                            color[2] * visibility // 255,
+                            color[3],
+                        )
 
         try:
             buffer = BytesIO()

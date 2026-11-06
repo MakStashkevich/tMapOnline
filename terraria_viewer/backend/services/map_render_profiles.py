@@ -8,6 +8,8 @@ from collections import OrderedDict
 from threading import Lock
 from typing import Any, cast
 
+from PIL import Image, ImageFilter
+
 from ..store_common import read_map_mask_png
 
 
@@ -18,7 +20,10 @@ class MapRenderProfileStore:
     OVERWORLD_WINDOW_WIDTH = 96
     OVERWORLD_WINDOW_HEIGHT = 54
     UNDERGROUND_RADIUS = 20
-    MASK_FORMAT_VERSION = 1
+    UNDERGROUND_CORE_RADIUS = 12
+    LIGHT_RADIUS_TILES = 32
+    LIGHT_SOURCE_NEARBY_TILES = 16
+    MASK_FORMAT_VERSION = 2
 
     def __init__(self, max_entries: int = 32, max_bytes: int = 96 * 1024 * 1024) -> None:
         self._max_entries = max_entries
@@ -42,6 +47,7 @@ class MapRenderProfileStore:
         surface_y: int | None,
         players: list[dict[str, Any]],
         full_map: bool = False,
+        light_sources: list[tuple[int, int]] | None = None,
     ) -> dict[str, Any]:
         mask_width = (world_width + 3) // 4
         mask_height = (world_height + 3) // 4
@@ -83,9 +89,17 @@ class MapRenderProfileStore:
                     if isinstance(player_id, str):
                         routes[player_id] = route_points
 
-                for index, visible in enumerate(player_mask):
-                    if visible:
-                        combined_mask[index] = 255
+                for index, visibility in enumerate(player_mask):
+                    if visibility > combined_mask[index]:
+                        combined_mask[index] = visibility
+
+            self._soften_exploration_edges(combined_mask, mask_width, mask_height)
+            self._add_light_falloff(
+                combined_mask,
+                mask_width,
+                mask_height,
+                light_sources or [],
+            )
 
         mask_bytes = bytes(combined_mask)
         digest = hashlib.blake2b(digest_size=20)
@@ -94,7 +108,7 @@ class MapRenderProfileStore:
         profile_id = digest.hexdigest()
         self._retain(profile_id, mask_bytes)
         explored_percent = (
-            sum(1 for visible in mask_bytes if visible) / len(mask_bytes) * 100
+            sum(1 for visible in mask_bytes if visible >= 200) / len(mask_bytes) * 100
             if mask_bytes
             else 0.0
         )
@@ -216,13 +230,78 @@ class MapRenderProfileStore:
 
         center_x = round((x + 0.5) * self.MASK_SCALE)
         center_y = round((y + 0.5) * self.MASK_SCALE)
-        radius = math.ceil(self.UNDERGROUND_RADIUS * self.MASK_SCALE)
+        core_radius = self.UNDERGROUND_CORE_RADIUS * self.MASK_SCALE
+        radius = self.UNDERGROUND_RADIUS * self.MASK_SCALE
+        radius_steps = math.ceil(radius)
         radius_squared = radius * radius
-        for offset_y in range(-radius, radius + 1):
-            for offset_x in range(-radius, radius + 1):
-                if offset_x * offset_x + offset_y * offset_y > radius_squared:
+        for offset_y in range(-radius_steps, radius_steps + 1):
+            for offset_x in range(-radius_steps, radius_steps + 1):
+                distance = math.hypot(offset_x, offset_y)
+                if distance > radius or offset_x * offset_x + offset_y * offset_y > radius_squared:
                     continue
                 mask_x = center_x + offset_x
                 mask_y = center_y + offset_y
                 if 0 <= mask_x < mask_width and 0 <= mask_y < mask_height:
-                    mask[mask_y * mask_width + mask_x] = 255
+                    if distance <= core_radius:
+                        visibility = 255
+                    else:
+                        fade = (distance - core_radius) / max(radius - core_radius, 1)
+                        visibility = round(255 * (1 - fade) ** 2)
+                    index = mask_y * mask_width + mask_x
+                    if visibility > mask[index]:
+                        mask[index] = visibility
+
+    def _add_light_falloff(
+        self,
+        mask: bytearray,
+        mask_width: int,
+        mask_height: int,
+        light_sources: list[tuple[int, int]],
+    ) -> None:
+        radius_steps = math.ceil(self.LIGHT_RADIUS_TILES * self.MASK_SCALE)
+        nearby_radius = math.ceil(self.LIGHT_SOURCE_NEARBY_TILES * self.MASK_SCALE)
+        radius_squared = radius_steps * radius_steps
+        for world_x, world_y in light_sources:
+            center_x = round((world_x + 0.5) * self.MASK_SCALE)
+            center_y = round((world_y + 0.5) * self.MASK_SCALE)
+            has_explored_neighbor = False
+            for dy in range(-nearby_radius, nearby_radius + 1):
+                if has_explored_neighbor:
+                    break
+                for dx in range(-nearby_radius, nearby_radius + 1):
+                    if dx * dx + dy * dy > nearby_radius * nearby_radius:
+                        continue
+                    x, y = center_x + dx, center_y + dy
+                    if 0 <= x < mask_width and 0 <= y < mask_height and mask[y * mask_width + x]:
+                        has_explored_neighbor = True
+                        break
+            if not has_explored_neighbor:
+                continue
+
+            for dy in range(-radius_steps, radius_steps + 1):
+                y = center_y + dy
+                if not 0 <= y < mask_height:
+                    continue
+                for dx in range(-radius_steps, radius_steps + 1):
+                    distance_squared = dx * dx + dy * dy
+                    if distance_squared > radius_squared:
+                        continue
+                    x = center_x + dx
+                    if not 0 <= x < mask_width:
+                        continue
+                    fade = math.sqrt(distance_squared) / radius_steps
+                    intensity = round(255 * (1 - fade) ** 2)
+                    index = y * mask_width + x
+                    if intensity > mask[index]:
+                        mask[index] = intensity
+
+    @staticmethod
+    def _soften_exploration_edges(mask: bytearray, width: int, height: int) -> None:
+        image_factory = cast(Any, Image)
+        image_filter = cast(Any, ImageFilter)
+        image = image_factory.frombytes("L", (width, height), bytes(mask))
+        blurred = image.filter(image_filter.GaussianBlur(radius=1.25)).tobytes()
+        for index, visibility in enumerate(blurred):
+            if visibility > mask[index]:
+                mask[index] = visibility
+        image.close()

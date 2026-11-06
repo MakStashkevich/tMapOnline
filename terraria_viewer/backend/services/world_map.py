@@ -392,6 +392,7 @@ class WorldMapMixin(StoreMixinContract):
         requested = str(world_id or "")
         now = time.time()
         route_cutoff = now - period_seconds
+        light_sources: set[tuple[int, int]] = set()
         with self._lock:
             active_id = str(self._server_info.get("world_id") or "")
             requested = requested or active_id
@@ -404,6 +405,16 @@ class WorldMapMixin(StoreMixinContract):
                     continue
                 selected_world = candidate
                 break
+
+            raw_light_sources = (selected_world or {}).get("light_sources", {})
+            if isinstance(raw_light_sources, dict):
+                for coordinate in raw_light_sources:
+                    try:
+                        light_x, light_y = (int(value) for value in str(coordinate).split(",", 1))
+                    except (TypeError, ValueError):
+                        continue
+                    if 0 <= light_x < int((selected_world or {}).get("width") or 0) and 0 <= light_y < int((selected_world or {}).get("height") or 0):
+                        light_sources.add((light_x, light_y))
 
             width = int((selected_world or {}).get("width") or self._server_info.get("world_width") or 0)
             height = int((selected_world or {}).get("height") or self._server_info.get("world_height") or 0)
@@ -465,6 +476,7 @@ class WorldMapMixin(StoreMixinContract):
             height,
             surface_y,
             player_sources,
+            light_sources=sorted(light_sources),
             full_map=full_map,
         )
         profile["world_id"] = requested

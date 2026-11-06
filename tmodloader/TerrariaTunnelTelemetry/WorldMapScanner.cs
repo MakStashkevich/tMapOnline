@@ -254,7 +254,7 @@ internal sealed class WorldMapScanner
 
         var points = changes.Select(change => change.Key).ToArray();
         var originalMap = Main.Map;
-        var bytes = new byte[checked(points.Length * 12)];
+        var bytes = new byte[checked(points.Length * 13)];
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
         try
         {
@@ -284,7 +284,7 @@ internal sealed class WorldMapScanner
                     }
                 }
                 var tileInfo = _tileData.CaptureTile(point.X, point.Y);
-                var offset = index * 12;
+                var offset = index * 13;
                 WriteUInt16(bytes, offset, checked((ushort)point.X));
                 WriteUInt16(bytes, offset + 2, checked((ushort)point.Y));
                 bytes[offset + 4] = color.R;
@@ -293,6 +293,7 @@ internal sealed class WorldMapScanner
                 bytes[offset + 7] = color.A;
                 WriteUInt16(bytes, offset + 8, tileInfo.TileType);
                 WriteUInt16(bytes, offset + 10, tileInfo.WallType);
+                bytes[offset + 12] = tileInfo.IsLightSource ? (byte)1 : (byte)0;
                 foreach (var name in tileInfo.Names)
                     names[name.Key] = name.Value;
             }
@@ -450,6 +451,7 @@ internal sealed class WorldMapScanner
                 data = Convert.ToBase64String(compressed.ToArray()),
                 tileInfo = tileInfo.Data,
                 tileNames = tileInfo.Names,
+                lightSources = tileInfo.LightSources.Select(point => new[] { point.X, point.Y }).ToArray(),
                 tileNamesLanguage = Language.ActiveCulture.Name,
                 tileNamesVersion = 6
             });

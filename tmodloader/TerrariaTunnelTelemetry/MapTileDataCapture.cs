@@ -17,17 +17,20 @@ internal sealed class MapTileDataCapture
         _names = names;
     }
 
-    public (string Data, Dictionary<string, string> Names) Capture(int x, int y, int width, int height)
+    public (string Data, Dictionary<string, string> Names, List<Microsoft.Xna.Framework.Point> LightSources) Capture(int x, int y, int width, int height)
     {
         // Each tile is stored as two little-endian ushort values; zero means no tile or wall.
         var raw = new byte[checked(width * height * 4)];
         var tileTypes = new HashSet<ushort>();
         var wallTypes = new HashSet<ushort>();
+        var lightSources = new List<Microsoft.Xna.Framework.Point>();
 
         for (var row = 0; row < height; row++)
         for (var column = 0; column < width; column++)
         {
             var tile = Main.tile[x + column, y + row];
+            if (tile.HasTile && tile.TileType < Main.tileLighted.Length && Main.tileLighted[tile.TileType])
+                lightSources.Add(new Microsoft.Xna.Framework.Point(x + column, y + row));
             var tileType = tile.HasTile ? checked((ushort)(tile.TileType + 1)) : (ushort)0;
             var wallType = tile.WallType == WallID.None ? (ushort)0 : checked((ushort)(tile.WallType + 1));
             if (tileType > 0) tileTypes.Add((ushort)(tileType - 1));
@@ -44,16 +47,17 @@ internal sealed class MapTileDataCapture
         using (var zlib = new ZLibStream(compressed, CompressionLevel.Fastest, leaveOpen: true))
             zlib.Write(raw, 0, raw.Length);
 
-        return (Convert.ToBase64String(compressed.ToArray()), _names.GetNamesForChunk(tileTypes, wallTypes));
+        return (Convert.ToBase64String(compressed.ToArray()), _names.GetNamesForChunk(tileTypes, wallTypes), lightSources);
     }
 
-    public (ushort TileType, ushort WallType, Dictionary<string, string> Names) CaptureTile(int x, int y)
+    public (ushort TileType, ushort WallType, bool IsLightSource, Dictionary<string, string> Names) CaptureTile(int x, int y)
     {
         var tile = Main.tile[x, y];
         var tileType = tile.HasTile ? checked((ushort)(tile.TileType + 1)) : (ushort)0;
         var wallType = tile.WallType == WallID.None ? (ushort)0 : checked((ushort)(tile.WallType + 1));
         var tileTypes = tileType == 0 ? new HashSet<ushort>() : new HashSet<ushort> { (ushort)(tileType - 1) };
         var wallTypes = wallType == 0 ? new HashSet<ushort>() : new HashSet<ushort> { (ushort)(wallType - 1) };
-        return (tileType, wallType, _names.GetNamesForChunk(tileTypes, wallTypes));
+        var isLightSource = tile.HasTile && tile.TileType < Main.tileLighted.Length && Main.tileLighted[tile.TileType];
+        return (tileType, wallType, isLightSource, _names.GetNamesForChunk(tileTypes, wallTypes));
     }
 }
