@@ -196,7 +196,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 continue;
             }
 
-            var packet = NetPingModule.Serialize(new Vector2(ping.X, ping.Y));
+            // The browser API uses pixel coordinates; Terraria's map packet uses tiles.
+            var packet = NetPingModule.Serialize(new Vector2(ping.X / 16f, ping.Y / 16f));
             NetManager.Instance.Broadcast(packet);
             _activeMapPings.Add(new MapPingEvent(
                 ping.CommandId,
@@ -216,8 +217,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         while (_pendingPlayerMapPings.TryDequeue(out var ping))
         {
-            // NetPingModule carries map coordinates in tiles. The web sends
-            // pixels and is converted to tiles before serialization above.
+            // NetPingModule carries map coordinates in tiles.
             if (ping.Slot < 0 || ping.Slot >= Main.player.Length
                 || ping.X < 0 || ping.Y < 0
                 || ping.X >= Main.maxTilesX || ping.Y >= Main.maxTilesY)
