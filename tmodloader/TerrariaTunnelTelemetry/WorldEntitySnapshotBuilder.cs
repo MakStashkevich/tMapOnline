@@ -123,9 +123,11 @@ internal sealed class WorldEntitySnapshotBuilder
         if (bossHeadSlot == -1)
         {
             // Main's fullscreen map centers friendly heads on the NPC hitbox.
+            // Its Y coordinate also follows gfxOffY, which is important for
+            // NPCs whose drawn sprite bobs or is vertically offset from the hitbox.
             return new Vector2(
                 npc.position.X + npc.width / 2,
-                npc.position.Y + npc.height / 2
+                npc.position.Y + npc.gfxOffY + npc.height / 2
             );
         }
 
