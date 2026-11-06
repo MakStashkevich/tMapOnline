@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from ...models import LiveTelemetrySnapshot, NpcEntity, PlayerDeath
 
 from ..store_common import (
