@@ -10,7 +10,7 @@ import struct
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 from urllib.parse import parse_qs, urlsplit
 
 from .store import GAME_LOG, WORLD_MAP_FILE, StatusStore
@@ -58,6 +58,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     store: StatusStore
     site_config: dict[str, Any] = {}
+    map_ping_sender: Callable[[float, float, str], bool] | None = None
 
     def do_GET(self) -> None:
         request = urlsplit(self.path)
@@ -315,6 +316,48 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request = urlsplit(self.path)
+        if request.path == "/api/world-map/ping":
+            origin = urlsplit(self.headers.get("Origin", ""))
+            forwarded_proto = self.headers.get("X-Forwarded-Proto", "http").split(",", 1)[0].strip()
+            request_origin = f"{forwarded_proto}://{self.headers.get('Host', '')}".rstrip("/")
+            if origin.scheme not in {"http", "https"} or f"{origin.scheme}://{origin.netloc}" != request_origin:
+                self._send(403, b"Map ping requests must come from this site.\n", "text/plain; charset=utf-8")
+                return
+            if self.map_ping_sender is None:
+                self._send(503, b"Game telemetry is not connected.\n", "text/plain; charset=utf-8")
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                content_length = 0
+            if not 2 <= content_length <= 4096 or "application/json" not in self.headers.get("Content-Type", ""):
+                self._send(400, b"Invalid map ping request.\n", "text/plain; charset=utf-8")
+                return
+            try:
+                payload = json.loads(self.rfile.read(content_length))
+                if not isinstance(payload, dict):
+                    raise ValueError
+                x = payload.get("x")
+                y = payload.get("y")
+                ping_id = payload.get("id")
+                if isinstance(x, bool) or isinstance(y, bool):
+                    raise ValueError
+                x = float(x)
+                y = float(y)
+                if (
+                    not isinstance(ping_id, str)
+                    or not 1 <= len(ping_id) <= 64
+                    or not (x >= 0 and y >= 0 and x < 10_000_000 and y < 10_000_000)
+                ):
+                    raise ValueError
+            except (ValueError, TypeError, json.JSONDecodeError):
+                self._send(400, b"Map ping coordinates are invalid.\n", "text/plain; charset=utf-8")
+                return
+            if not self.map_ping_sender(x, y, ping_id):
+                self._send(503, b"Game telemetry is not connected.\n", "text/plain; charset=utf-8")
+                return
+            self._send(202, b'{"queued":true}', "application/json; charset=utf-8", cache_control="no-store")
+            return
         if request.path == "/api/world-map/render-profile":
             try:
                 content_length = int(self.headers.get("Content-Length", "0"))

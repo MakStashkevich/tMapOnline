@@ -15,6 +15,7 @@ export type MapViewportBindings = {
   renderVisibleChunks(): void;
   prioritizeWorldPoint?(point: WorldPoint): void;
   downloadMapImage(): void;
+  onMapPing?(point: WorldPoint): void;
 };
 
 /** Owns map zoom, drag, pinch, and viewport-related browser events. */
@@ -23,6 +24,7 @@ export class MapViewportController {
   private pinchStart: PinchStart | null = null;
   private dragStart: DragStart | null = null;
   private resizeFrame: number | null = null;
+  private lastTap: { at: number; x: number; y: number } | null = null;
 
   constructor(
     private readonly viewport: HTMLElement,
@@ -126,6 +128,12 @@ export class MapViewportController {
 
     if (event.pointerType !== 'mouse') this.bindings.scheduleTooltip(event);
     this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (
+      this.dragStart &&
+      Math.hypot(event.clientX - this.dragStart.x, event.clientY - this.dragStart.y) > 12
+    ) {
+      this.lastTap = null;
+    }
 
     if (this.pointers.size >= 2 && this.pinchStart) {
       this.updatePinch();
@@ -148,6 +156,13 @@ export class MapViewportController {
   }
 
   private onPointerEnd(event: PointerEvent): void {
+    const endedPointer = this.pointers.get(event.pointerId);
+    const dragStart = this.dragStart;
+    const wasTap =
+      event.type === 'pointerup' &&
+      endedPointer !== undefined &&
+      dragStart !== null &&
+      Math.hypot(endedPointer.x - dragStart.x, endedPointer.y - dragStart.y) <= 12;
     this.pointers.delete(event.pointerId);
 
     if (this.pointers.size === 1) {
@@ -158,10 +173,31 @@ export class MapViewportController {
     }
 
     if (this.pointers.size === 0) {
+      if (wasTap && dragStart) this.detectMapPing(event, dragStart);
       this.pinchStart = null;
       this.dragStart = null;
       this.viewport.classList.remove('dragging');
     }
+  }
+
+  private detectMapPing(event: PointerEvent, start: DragStart): void {
+    if (!this.bindings.onMapPing) return;
+    const now = performance.now();
+    const bounds = this.viewport.getBoundingClientRect();
+    const tapX = (start.x + event.clientX) / 2;
+    const tapY = (start.y + event.clientY) / 2;
+    const previous = this.lastTap;
+    this.lastTap = { at: now, x: tapX, y: tapY };
+    if (
+      !previous ||
+      now - previous.at > 500 ||
+      Math.hypot(tapX - previous.x, tapY - previous.y) > 28
+    ) {
+      return;
+    }
+
+    this.lastTap = null;
+    this.bindings.onMapPing(this.bindings.worldPointAt(tapX - bounds.left, tapY - bounds.top));
   }
 
   private onPointerLeave(event: PointerEvent): void {

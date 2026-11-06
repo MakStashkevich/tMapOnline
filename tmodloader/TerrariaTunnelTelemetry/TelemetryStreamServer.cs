@@ -23,6 +23,8 @@ internal sealed class TelemetryStreamServer : IDisposable
     private int _nextClientId;
     private long _lastAcknowledgedSnapshotId;
 
+    public event Action<string, float, float>? MapPingRequested;
+
     public long LastAcknowledgedSnapshotId => Interlocked.Read(ref _lastAcknowledgedSnapshotId);
 
     public TelemetryStreamServer(Mod mod)
@@ -101,7 +103,8 @@ internal sealed class TelemetryStreamServer : IDisposable
             var client = new TelemetryClient(
                 socket,
                 () => _clients.TryRemove(id, out _),
-                AcknowledgeSnapshot);
+                AcknowledgeSnapshot,
+                (commandId, x, y) => MapPingRequested?.Invoke(commandId, x, y));
             _clients[id] = client;
 
             // A new reader needs the current state immediately, without waiting for another game tick.
@@ -129,6 +132,7 @@ internal sealed class TelemetryStreamServer : IDisposable
         private readonly TcpClient _socket;
         private readonly Action _onClosed;
         private readonly Action<long> _onAcknowledged;
+        private readonly Action<string, float, float> _onMapPingRequested;
         private readonly Channel<string> _pending = Channel.CreateBounded<string>(
             new BoundedChannelOptions(1)
             {
@@ -139,11 +143,16 @@ internal sealed class TelemetryStreamServer : IDisposable
             }
         );
 
-        public TelemetryClient(TcpClient socket, Action onClosed, Action<long> onAcknowledged)
+        public TelemetryClient(
+            TcpClient socket,
+            Action onClosed,
+            Action<long> onAcknowledged,
+            Action<string, float, float> onMapPingRequested)
         {
             _socket = socket;
             _onClosed = onClosed;
             _onAcknowledged = onAcknowledged;
+            _onMapPingRequested = onMapPingRequested;
         }
 
         public void Publish(string jsonLine) => _pending.Writer.TryWrite(jsonLine);
@@ -154,7 +163,7 @@ internal sealed class TelemetryStreamServer : IDisposable
             {
                 var stream = _socket.GetStream();
                 var writeTask = WriteSnapshotsAsync(stream, cancellationToken);
-                var acknowledgementTask = ReadAcknowledgementsAsync(stream, cancellationToken);
+                var acknowledgementTask = ReadControlMessagesAsync(stream, cancellationToken);
                 await Task.WhenAny(writeTask, acknowledgementTask).ConfigureAwait(false);
                 Stop();
                 await Task.WhenAll(writeTask, acknowledgementTask).ConfigureAwait(false);
@@ -182,7 +191,7 @@ internal sealed class TelemetryStreamServer : IDisposable
                 }
         }
 
-        private async Task ReadAcknowledgementsAsync(NetworkStream stream, CancellationToken cancellationToken)
+        private async Task ReadControlMessagesAsync(NetworkStream stream, CancellationToken cancellationToken)
         {
             using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
             while (!cancellationToken.IsCancellationRequested)
@@ -197,11 +206,25 @@ internal sealed class TelemetryStreamServer : IDisposable
                 try
                 {
                     using var document = JsonDocument.Parse(line);
-                    if (!document.RootElement.TryGetProperty("ackSnapshotId", out var value)
-                        || !value.TryGetInt64(out var acknowledgedSnapshotId))
+                    var root = document.RootElement;
+                    if (root.TryGetProperty("ackSnapshotId", out var value)
+                        && value.TryGetInt64(out var acknowledgedSnapshotId))
+                    {
+                        _onAcknowledged(acknowledgedSnapshotId);
                         continue;
+                    }
 
-                    _onAcknowledged(acknowledgedSnapshotId);
+                    if (root.TryGetProperty("type", out var type)
+                        && type.GetString() == "map_ping"
+                        && root.TryGetProperty("commandId", out var commandId)
+                        && commandId.ValueKind == JsonValueKind.String
+                        && root.TryGetProperty("x", out var x)
+                        && x.TryGetSingle(out var worldX)
+                        && root.TryGetProperty("y", out var y)
+                        && y.TryGetSingle(out var worldY))
+                    {
+                        _onMapPingRequested(commandId.GetString()!, worldX, worldY);
+                    }
                 }
                 catch (JsonException)
                 {

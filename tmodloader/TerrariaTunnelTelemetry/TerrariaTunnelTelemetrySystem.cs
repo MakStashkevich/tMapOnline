@@ -19,6 +19,8 @@ using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
 using Terraria.Map;
 using Terraria.Localization;
+using Terraria.GameContent.NetModules;
+using Terraria.Net;
 
 namespace TerrariaTunnelTelemetry;
 
@@ -30,6 +32,9 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     private readonly System.Collections.Generic.Dictionary<int, (int TileX, int TileY)>
         _pendingRespawnPositions = new();
     private readonly ConcurrentDictionary<int, byte> _teleportedSlots = new();
+    private readonly ConcurrentQueue<(string CommandId, float X, float Y)> _pendingMapPings = new();
+    private readonly ConcurrentQueue<(int Slot, float X, float Y, double Timestamp)> _pendingPlayerMapPings = new();
+    private readonly List<MapPingEvent> _activeMapPings = new();
     private readonly System.Collections.Generic.List<PendingPlayerDeath> _pendingPlayerDeaths = new();
     private readonly System.Collections.Generic.Dictionary<int, System.Collections.Generic.Dictionary<string, object?>> _cachedPlayers = new();
     private object[] _cachedNpcs = Array.Empty<object>();
@@ -54,6 +59,10 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         "TERRARIA_TELEMETRY_MAP_TILE_UPDATE_INTERVAL_TICKS", 1);
     private readonly bool _initialWorldScanEnabled = ReadBooleanEnvironmentVariable(
         "TERRARIA_TELEMETRY_INITIAL_WORLD_SCAN_ENABLED", true);
+    private readonly bool _mapPingsFromPlayersToWeb = ReadBooleanEnvironmentVariable(
+        "TERRARIA_TELEMETRY_MAP_PINGS_FROM_PLAYERS_TO_WEB", true);
+    private readonly bool _mapPingsFromWebToPlayers = ReadBooleanEnvironmentVariable(
+        "TERRARIA_TELEMETRY_MAP_PINGS_FROM_WEB_TO_PLAYERS", true);
     private readonly int _worldScanIntervalTicks = ReadPositiveEnvironmentInteger(
         "TERRARIA_TELEMETRY_WORLD_SCAN_INTERVAL_TICKS", 1);
     private readonly int _deathRetentionSeconds = ReadNonNegativeEnvironmentInteger(
@@ -73,6 +82,7 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         On_Player.KillMe += CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly += OnServerTick;
         _telemetryStream = new TelemetryStreamServer(Mod);
+        _telemetryStream.MapPingRequested += QueueMapPing;
         _mapTileNames = new MapTileNameCatalog(Mod);
         _mapTileData = new MapTileDataCapture(_mapTileNames);
         _mapScanner = new WorldMapScanner(
@@ -93,9 +103,14 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         On_Player.KillMe -= CapturePlayerDeath;
         Main.OnTickForThirdPartySoftwareOnly -= OnServerTick;
         _telemetryStream?.Dispose();
+        if (_telemetryStream is not null)
+            _telemetryStream.MapPingRequested -= QueueMapPing;
         _telemetryStream = null;
         _clientUuids.Clear();
         _teleportedSlots.Clear();
+        while (_pendingMapPings.TryDequeue(out _)) { }
+        while (_pendingPlayerMapPings.TryDequeue(out _)) { }
+        _activeMapPings.Clear();
         _pendingRespawnPositions.Clear();
         _sessions.Clear();
         _pendingPlayerDeaths.Clear();
@@ -134,6 +149,8 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         _mapScanner?.AcknowledgeTileChanges(_telemetryStream?.LastAcknowledgedSnapshotId ?? 0);
         RemoveExpiredPendingDeaths();
         _serverTickCount++;
+        CapturePendingPlayerMapPings();
+        BroadcastPendingMapPings();
         var playerPositionDue = _serverTickCount % _playerPositionIntervalTicks == 0;
         var entityUpdateDue = _serverTickCount % _entityIntervalTicks == 0;
         var mapCaptureDue = _serverTickCount % _mapCaptureIntervalTicks == 0;
@@ -148,6 +165,72 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var mapChangesReady = mapTileUpdateDue && _mapScanner?.HasPendingTileChanges == true;
         if (playerPositionDue || entityUpdateDue || mapCaptureDue || mapChangesReady || _nextSnapshotId == 0)
             UpdateSnapshotIfDue(playerPositionDue, entityUpdateDue, mapCaptureDue, mapTileUpdateDue);
+    }
+
+    private void QueueMapPing(string commandId, float x, float y)
+    {
+        if (!_mapPingsFromWebToPlayers)
+            return;
+        if (string.IsNullOrWhiteSpace(commandId)
+            || commandId.Length > 64
+            || float.IsNaN(x)
+            || float.IsInfinity(x)
+            || float.IsNaN(y)
+            || float.IsInfinity(y))
+            return;
+
+        _pendingMapPings.Enqueue((commandId, x, y));
+    }
+
+    private void BroadcastPendingMapPings()
+    {
+        // Keep all Terraria state access and packet sends on the game thread.
+        for (var count = 0; count < 8 && _pendingMapPings.TryDequeue(out var ping); count++)
+        {
+            if (ping.X < 0 || ping.Y < 0 || ping.X >= Main.maxTilesX * 16f || ping.Y >= Main.maxTilesY * 16f)
+            {
+                Mod.Logger.Warn($"Rejected out-of-world map ping command {ping.CommandId}.");
+                continue;
+            }
+
+            NetManager.Instance.Broadcast(NetPingModule.Serialize(new Vector2(ping.X, ping.Y)));
+            _activeMapPings.Add(new MapPingEvent(
+                ping.CommandId,
+                "Веб",
+                ping.X / 16f,
+                ping.Y / 16f,
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                "web",
+                Main.worldID
+            ));
+        }
+    }
+
+    private void CapturePendingPlayerMapPings()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        while (_pendingPlayerMapPings.TryDequeue(out var ping))
+        {
+            if (ping.Slot < 0 || ping.Slot >= Main.player.Length
+                || ping.X < 0 || ping.Y < 0
+                || ping.X >= Main.maxTilesX * 16f || ping.Y >= Main.maxTilesY * 16f)
+                continue;
+
+            var playerName = _sessions.TryGetValue(ping.Slot, out var session)
+                ? session.Name
+                : $"Игрок {ping.Slot + 1}";
+            _activeMapPings.Add(new MapPingEvent(
+                Guid.NewGuid().ToString("N"),
+                playerName,
+                ping.X / 16f,
+                ping.Y / 16f,
+                (long)ping.Timestamp,
+                "player",
+                Main.worldID
+            ));
+        }
+
+        _activeMapPings.RemoveAll(ping => now - ping.Timestamp >= 15);
     }
 
     private void CapturePlayerDeath(On_Player.orig_KillMe orig, Player self,
@@ -410,6 +493,17 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
                 list = players
             },
             playerDeaths,
+            mapPings = _activeMapPings
+                .Where(ping => ping.WorldId == Main.worldID)
+                .Select(ping => new
+            {
+                id = ping.Id,
+                playerName = ping.PlayerName,
+                x = ping.X,
+                y = ping.Y,
+                timestamp = ping.Timestamp,
+                source = ping.Source
+            }).ToArray(),
             mapScan = _mapScanner?.GetStatus(),
             baseMapCaptures = _mapScanner?.DrainCaptures() ?? Array.Empty<object>()
         };
@@ -461,6 +555,11 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         var slot = messageBuffer.whoAmI;
         if (slot < 0 || slot >= Netplay.Clients.Length)
             return;
+        if (_mapPingsFromPlayersToWeb && messageType == MessageID.NetModules)
+        {
+            CapturePlayerMapPing(messageBuffer, slot, start, length);
+            return;
+        }
         if (messageType == MessageID.TileManipulation)
         {
             CaptureTileManipulationPacket(messageBuffer, start, length);
@@ -499,6 +598,31 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
         catch (Exception exception)
         {
             Mod.Logger.Warn($"Could not decode ClientUUID packet for player slot {slot}: {exception.GetType().Name}.");
+        }
+    }
+
+    private void CapturePlayerMapPing(MessageBuffer messageBuffer, int slot, int start, int length)
+    {
+        // NetManager has already handled the packet and relayed it to the other
+        // clients. Read only the vanilla ping module payload for web telemetry.
+        if (start < 0 || length < 11 || start + length > messageBuffer.readBuffer.Length)
+            return;
+
+        try
+        {
+            using var stream = new MemoryStream(messageBuffer.readBuffer, start + 1, length - 1, writable: false);
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: false);
+            if (reader.ReadUInt16() != NetManager.Instance.GetId<NetPingModule>())
+                return;
+
+            var x = reader.ReadSingle();
+            var y = reader.ReadSingle();
+            if (float.IsFinite(x) && float.IsFinite(y))
+                _pendingPlayerMapPings.Enqueue((slot, x, y, DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+        }
+        catch (Exception exception)
+        {
+            Mod.Logger.Debug($"Could not decode player map ping packet: {exception.GetType().Name}.");
         }
     }
 
@@ -556,6 +680,16 @@ public sealed class TerrariaTunnelTelemetrySystem : ModSystem
     }
 
     private sealed record PlayerSession(string Name, string? Uuid, long JoinedAtUnix);
+
+    private sealed record MapPingEvent(
+        string Id,
+        string PlayerName,
+        float X,
+        float Y,
+        long Timestamp,
+        string Source,
+        int WorldId
+    );
     private sealed class PendingPlayerDeath(string id, string name, string? uuid, int tileX, int tileY, long timestamp)
     {
         public string Id { get; } = id;

@@ -6,6 +6,7 @@ import json
 import logging
 import socket
 import threading
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -34,6 +35,7 @@ class TelemetryStreamClient:
         self._on_connection_change = on_connection_change
         self._stop = threading.Event()
         self._socket_lock = threading.Lock()
+        self._send_lock = threading.Lock()
         self._socket: socket.socket | None = None
         self._thread = threading.Thread(target=self._run, name="terraria-telemetry-stream", daemon=True)
 
@@ -55,6 +57,23 @@ class TelemetryStreamClient:
                 pass
         if self._thread.is_alive():
             self._thread.join(timeout=2)
+
+    def send_map_ping(self, x: float, y: float, ping_id: str) -> bool:
+        """Queue a map ping command for the tModLoader server over the duplex stream."""
+        payload = json.dumps(
+            {"type": "map_ping", "commandId": ping_id or uuid.uuid4().hex, "x": x, "y": y},
+            separators=(",", ":"),
+        ) + "\n"
+        with self._socket_lock:
+            active_socket = self._socket
+        if active_socket is None:
+            return False
+        try:
+            with self._send_lock:
+                active_socket.sendall(payload.encode("utf-8"))
+            return True
+        except OSError:
+            return False
 
     def _run(self) -> None:
         connected = False
@@ -88,9 +107,10 @@ class TelemetryStreamClient:
                                 self._on_snapshot(snapshot_object)
                                 snapshot_id = snapshot_object.get("snapshotId")
                                 if isinstance(snapshot_id, int) and not isinstance(snapshot_id, bool):
-                                    connection.sendall(
-                                        (json.dumps({"ackSnapshotId": snapshot_id}) + "\n").encode("utf-8")
-                                    )
+                                    with self._send_lock:
+                                        connection.sendall(
+                                            (json.dumps({"ackSnapshotId": snapshot_id}) + "\n").encode("utf-8")
+                                        )
                             except Exception:
                                 logger.exception("Failed to apply tModLoader telemetry snapshot; keeping the stream open.")
                 if not self._stop.is_set():

@@ -132,6 +132,12 @@ def _start_game_process(
             "TERRARIA_TELEMETRY_MAP_TILE_UPDATE_INTERVAL_TICKS": str(
                 config["telemetry"]["map_tile_update_interval_ticks"]
             ),
+            "TERRARIA_TELEMETRY_MAP_PINGS_FROM_PLAYERS_TO_WEB": str(
+                config["telemetry"]["map_pings_from_players_to_web"]
+            ).lower(),
+            "TERRARIA_TELEMETRY_MAP_PINGS_FROM_WEB_TO_PLAYERS": str(
+                config["telemetry"]["map_pings_from_web_to_players"]
+            ).lower(),
             "TERRARIA_TELEMETRY_INITIAL_WORLD_SCAN_ENABLED": str(
                 config["telemetry"]["initial_world_scan_enabled"]
             ).lower(),
@@ -191,6 +197,11 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
         handle_telemetry_connection,
         host=server_config["telemetry_host"],
         port=server_config["telemetry_port"],
+    )
+    dashboard.RequestHandlerClass.map_ping_sender = (
+        telemetry.send_map_ping
+        if config["telemetry"]["map_pings_from_web_to_players"]
+        else None
     )
     telemetry.start()
     game_process: subprocess.Popen[bytes] | None = None

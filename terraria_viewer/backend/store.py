@@ -111,6 +111,8 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
         self._telemetry_last_received_monotonic: float | None = None
         self._telemetry_interval_ms: float | None = None
         self._telemetry_snapshot_id: int | None = None
+        self._recent_map_pings: list[dict[str, Any]] = []
+        self._recent_map_pings_world_id: str | None = None
         self._active_npcs: list[NpcEntity] = []
         self._active_npcs_world_id: str | None = None
         self._active_coins: list[DroppedCoin] = []

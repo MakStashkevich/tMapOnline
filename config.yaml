@@ -25,6 +25,8 @@ telemetry:
   entity_interval_ticks: 1
   map_capture_interval_ticks: 30
   map_tile_update_interval_ticks: 1
+  map_pings_from_players_to_web: true
+  map_pings_from_web_to_players: true
   initial_world_scan_enabled: false
   world_scan_interval_ticks: 1
   browser_live_poll_interval_ms: 50

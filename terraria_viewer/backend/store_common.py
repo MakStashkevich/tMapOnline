@@ -134,6 +134,7 @@ class StoreMixinContract(Protocol):
     _active_npcs_world_id: str | None
     _active_coins: list[DroppedCoin]
     _active_coins_world_id: str | None
+    _recent_map_pings: list[dict[str, Any]]
     _updated_at: float
 
     def notify_live_update(self) -> None: ...

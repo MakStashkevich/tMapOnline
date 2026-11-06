@@ -28,6 +28,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "entity_interval_ticks": 6,
         "map_capture_interval_ticks": 30,
         "map_tile_update_interval_ticks": 1,
+        "map_pings_from_players_to_web": True,
+        "map_pings_from_web_to_players": True,
         "initial_world_scan_enabled": True,
         "world_scan_interval_ticks": 1,
         "browser_live_poll_interval_ms": 50,
@@ -112,6 +114,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
             raise ValueError(f"telemetry.{key} must be a positive integer")
     if type(config["telemetry"].get("initial_world_scan_enabled")) is not bool:
         raise ValueError("telemetry.initial_world_scan_enabled must be a boolean")
+    for key in ("map_pings_from_players_to_web", "map_pings_from_web_to_players"):
+        if type(config["telemetry"].get(key)) is not bool:
+            raise ValueError(f"telemetry.{key} must be a boolean")
     for key in (
         "browser_live_poll_interval_ms",
         "browser_overview_poll_interval_ms",

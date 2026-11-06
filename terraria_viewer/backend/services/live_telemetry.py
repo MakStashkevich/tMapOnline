@@ -47,6 +47,7 @@ class LiveTelemetryMixin(StoreMixinContract):
         telemetry = LiveTelemetrySnapshot.from_payload(snapshot)
         received_at = time.time()
         received_monotonic = time.monotonic()
+        world = telemetry.world
         with self._lock:
             previous_received = self._telemetry_last_received_monotonic
             if previous_received is not None:
@@ -59,8 +60,13 @@ class LiveTelemetryMixin(StoreMixinContract):
             self._telemetry_last_received_monotonic = received_monotonic
             self._telemetry_received_at = received_at
             self._telemetry_snapshot_id = telemetry.snapshot_id
+            world_id = world.get("id", world.get("world_id"))
+            normalized_world_id = str(world_id) if world_id is not None else None
+            if normalized_world_id != self._recent_map_pings_world_id:
+                self._recent_map_pings.clear()
+                self._recent_map_pings_world_id = normalized_world_id
+            self._ingest_map_pings_locked(snapshot.get("mapPings"), received_at)
         server = telemetry.server
-        world = telemetry.world
         active_npcs: list[NpcEntity] = []
         for npc in telemetry.npcs:
             texture_hash = npc.mod_texture
@@ -193,6 +199,43 @@ class LiveTelemetryMixin(StoreMixinContract):
             telemetry_updated_at=telemetry.generated_at,
         )
         self.notify_live_update()
+
+    def _ingest_map_pings_locked(self, value: Any, received_at: float) -> None:
+        self._recent_map_pings = [
+            ping for ping in self._recent_map_pings
+            if received_at - float(ping.get("timestamp", 0)) < 15
+        ]
+        if not isinstance(value, list):
+            return
+
+        known_ids = {ping["id"] for ping in self._recent_map_pings}
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            ping_id = str(item.get("id") or "")
+            player_name = str(item.get("playerName") or "").strip()
+            try:
+                x, y = float(item.get("x")), float(item.get("y"))
+                timestamp = float(item.get("timestamp"))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if (
+                not ping_id or len(ping_id) > 64 or ping_id in known_ids
+                or not player_name or len(player_name) > 64
+                or not math.isfinite(x) or not math.isfinite(y)
+                or not math.isfinite(timestamp) or x < 0 or y < 0
+            ):
+                continue
+            self._recent_map_pings.append({
+                "id": ping_id,
+                "player_name": player_name,
+                "x": x,
+                "y": y,
+                "timestamp": timestamp,
+                "source": "web" if item.get("source") == "web" else "player",
+            })
+            known_ids.add(ping_id)
+        self._recent_map_pings = self._recent_map_pings[-128:]
     def _save_player_death_locations(
         self, deaths: tuple[PlayerDeath, ...], world: dict[str, Any]
     ) -> None:

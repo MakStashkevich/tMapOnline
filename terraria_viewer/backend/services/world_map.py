@@ -722,6 +722,20 @@ class WorldMapMixin(StoreMixinContract):
                 for item in self._active_coins
                 if include_coins and telemetry_is_fresh and is_visible(item.tile_x, item.tile_y)
             ]
+            map_pings = [
+                {
+                    "id": item["id"],
+                    "player_name": item["player_name"],
+                    "x": item["x"],
+                    "y": item["y"],
+                    "timestamp": item["timestamp"],
+                    "source": item["source"],
+                }
+                for item in self._recent_map_pings
+                if telemetry_is_fresh
+                and time.time() - item["timestamp"] < 15
+                and is_visible(item["x"], item["y"])
+            ]
             return {
                 "world": {
                     "id": active_id,
@@ -742,6 +756,7 @@ class WorldMapMixin(StoreMixinContract):
                 "active_npcs": active_npcs,
                 "active_npcs_fresh": telemetry_is_fresh,
                 "coins": visible_coins,
+                "map_pings": map_pings,
                 "telemetry": {
                     "snapshot_id": self._telemetry_snapshot_id,
                     "received_at": received_at,

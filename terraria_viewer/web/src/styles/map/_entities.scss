@@ -63,3 +63,39 @@
   height: auto;
   image-rendering: pixelated;
 }
+.map-ping-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  pointer-events: none;
+}
+.map-ping-marker {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  opacity: 1;
+  transition: opacity 2.5s linear;
+}
+.map-ping-marker.fading {
+  opacity: 0;
+}
+.map-ping-sprite {
+  display: block;
+  width: 18px;
+  height: 18px;
+  background-image: url('/assets/map-ping-sheet.png');
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  animation: map-ping-frames 500ms steps(5, end) infinite;
+}
+@keyframes map-ping-frames {
+  to {
+    background-position-y: -90px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-ping-sprite {
+    animation: none;
+  }
+}

@@ -9,6 +9,7 @@ import { MapDiagnosticsPanel } from './map-diagnostics-panel';
 import { MapPyramidLayerRenderer } from './map-pyramid-layer-renderer';
 import { MapImageExporter } from './map-image-exporter';
 import { MapRenderDebugPanel } from './map-render-debug-panel';
+import { MapPingLayer } from './map-ping-layer';
 
 const modules = await activateModules('world_map');
 
@@ -151,6 +152,7 @@ const modules = await activateModules('world_map');
       y <= viewport.worldTop + viewport.worldHeight + padding,
     );
   });
+  const mapPingLayer = new MapPingLayer($('pings'));
   const routeLayer = new MapRouteLayer($('route-layer'), colors);
   const mapDiagnostics = new MapDiagnosticsPanel(Boolean(debugMode));
   const playerPaths = new MapPlayerPathService();
@@ -677,6 +679,7 @@ const modules = await activateModules('world_map');
   };
   const renderLiveLayers = () => {
     if (!data) return;
+    mapPingLayer.setWorld(Number(data.world.width), Number(data.world.height), data.world.id);
     const players = data.players || [];
     const routedPlayers = players
       .filter((player) => activeRoutePlayerIds.has(player.id) && playerOptions(player).route)
@@ -1062,6 +1065,7 @@ const modules = await activateModules('world_map');
     requestMs: number | null,
   ): Promise<void> {
     if (!data || String(data.world?.id) !== String(payload.world?.id)) return;
+    for (const ping of payload.map_pings || []) mapPingLayer.add(ping);
     if (typeof payload.world?.blood_moon === 'boolean') {
       data.world.blood_moon = payload.world.blood_moon;
       updateMapBackground();
@@ -1414,6 +1418,29 @@ const modules = await activateModules('world_map');
       renderPriorityExpiresAt = performance.now() + 1500;
     },
     downloadMapImage,
+    onMapPing: (point) => {
+      if (!data?.world) return;
+      const x = Number(point.x);
+      const y = Number(point.y);
+      if (
+        !Number.isFinite(x) ||
+        !Number.isFinite(y) ||
+        x < 0 ||
+        y < 0 ||
+        x >= Number(data.world.width) ||
+        y >= Number(data.world.height)
+      ) {
+        return;
+      }
+
+      const id = crypto.randomUUID();
+      mapPingLayer.add({ id, x, y, timestamp: Date.now() / 1000, player_name: 'Вы' });
+      void fetch('/api/world-map/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, x: x * 16, y: y * 16 }),
+      }).catch((error) => console.warn('Could not send map ping to the server:', error));
+    },
   });
   viewportController.bind();
   refresh(true)
