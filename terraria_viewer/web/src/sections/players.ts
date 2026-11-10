@@ -5,6 +5,8 @@ type PlayersPayload = {
   online?: { count?: number; ids?: string[] };
   players?: PlayerRecord[];
 };
+type PlayerLayerOptions = { explore: boolean; route: boolean };
+type PlayerLayerState = Record<string, PlayerLayerOptions | boolean>;
 
 const formatDuration = (value?: number): string => {
   let seconds = Math.max(0, Math.floor(Number(value) || 0));
@@ -63,6 +65,7 @@ export async function mount(root: HTMLElement): Promise<void> {
       header.append(badge);
     }
     card.append(header);
+    card.append(createPlayerLayerOptions(player.id, player.name));
     const stats = document.createElement('p');
     stats.textContent = `Всего в игре: ${formatDuration(player.total_seconds)} — Сессий: ${(player.sessions || []).length} — Впервые: ${formatDate(player.first_seen_at)} — Последний раз: ${formatDate(player.last_seen_at)}`;
     card.append(stats);
@@ -97,6 +100,56 @@ export async function mount(root: HTMLElement): Promise<void> {
   scheduleAvatarRefresh(avatarTargets);
 }
 
+function createPlayerLayerOptions(playerId: string, playerName: string): HTMLElement {
+  const options = readPlayerLayerOptions(playerId);
+  const group = document.createElement('fieldset');
+  group.className = 'player-map-options';
+  const legend = document.createElement('legend');
+  legend.textContent = 'Показывать на карте';
+  group.append(legend);
+
+  for (const [key, label] of [
+    ['explore', 'Исследованная область'],
+    ['route', 'История маршрута'],
+  ] as const) {
+    const row = document.createElement('label');
+    row.className = 'player-map-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = options[key];
+    checkbox.setAttribute('aria-label', `${label} игрока ${playerName || 'Игрок'}`);
+    checkbox.addEventListener('change', () => {
+      window.dispatchEvent(
+        new CustomEvent('terraria:player-layer-options', {
+          detail: { playerId, [key]: checkbox.checked },
+        }),
+      );
+    });
+    const text = document.createElement('span');
+    text.textContent = label;
+    row.append(checkbox, text);
+    group.append(row);
+  }
+  return group;
+}
+
+function readPlayerLayerOptions(playerId: string): PlayerLayerOptions {
+  try {
+    const stored = JSON.parse(
+      localStorage.getItem('terraria-world-map-players') || '{}',
+    ) as PlayerLayerState;
+    const value = stored[playerId];
+    if (typeof value === 'object' && value !== null) {
+      return { explore: value.explore !== false, route: value.route === true };
+    }
+    return value === undefined
+      ? { explore: true, route: false }
+      : { explore: value !== false, route: true };
+  } catch {
+    return { explore: true, route: false };
+  }
+}
+
 type PlayerAvatarTarget = {
   playerId: string;
   container: HTMLElement;
@@ -116,7 +169,9 @@ function createPixelAvatarLoader(): HTMLElement {
 
 async function renderPlayerAvatar(target: PlayerAvatarTarget, avatarUrl: string): Promise<boolean> {
   const source = await loadSprite(avatarUrl);
-  if (!source || !target.container.isConnected) return false;
+  // Sections are mounted while their modal is still detached from the document.
+  // The sprite can finish loading before PixelModal attaches the section root.
+  if (!source) return false;
 
   // Player cards use the raw head pixels; map-only team outlines do not belong in this menu.
   const image = document.createElement('img');

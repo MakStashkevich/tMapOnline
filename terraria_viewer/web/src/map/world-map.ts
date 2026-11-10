@@ -70,17 +70,11 @@ const mapDisplaySettings = readMapDisplaySettings();
     liveSince = 0,
     mapRevision = 0;
   let renderProfileId: string | null = null;
-  let routePeriod = '7d';
-  let activeRoutePeriod = '7d';
+  const routePeriod = `${modules.routeHistoryDays}d`;
+  let activeRoutePeriod = routePeriod;
   let profileRequestVersion = 0;
   const routeHistories = new Map<string, any[]>();
   let activeRoutePlayerIds = new Set<string>();
-  try {
-    const savedRoutePeriod = localStorage.getItem('terraria-world-map-route-period');
-    if (savedRoutePeriod === '24h' || savedRoutePeriod === '7d' || savedRoutePeriod === '30d') {
-      routePeriod = savedRoutePeriod;
-    }
-  } catch {}
   let liveEventSource: EventSource | null = null;
   let liveStreamConnected = false;
   let liveStreamIntervalMs = 0;
@@ -111,7 +105,6 @@ const mapDisplaySettings = readMapDisplaySettings();
     deathRenderKey = '',
     pylonRenderKey = '',
     spawnRenderKey = '',
-    toggleKey = '',
     canvasWorld = '';
   let renderPriorityPoint = null;
   let renderPriorityExpiresAt = 0;
@@ -161,6 +154,7 @@ const mapDisplaySettings = readMapDisplaySettings();
   window.addEventListener('terraria:map-display-settings', (event) => {
     const next = (event as CustomEvent<MapDisplaySettings>).detail;
     if (!next) return;
+    const routesWereEnabled = mapDisplaySettings.routes;
     Object.assign(mapDisplaySettings, next);
     mapEntityLayer.setInterpolationDelay(mapDisplaySettings.interpolationMs);
     mapEntityLayer.setAnimationEnabled(
@@ -170,6 +164,9 @@ const mapDisplaySettings = readMapDisplaySettings();
       renderLiveLayers();
       redrawVisiblePaths();
       updateLiveStreamCadence();
+      if (!routesWereEnabled && mapDisplaySettings.routes && modules['world_map.routes']) {
+        void requestAndRenderProfile(selectedRoutePlayerIds(), routePeriod);
+      }
     }
   });
   const mapPingLayer = new MapPingLayer($('pings'));
@@ -183,6 +180,7 @@ const mapDisplaySettings = readMapDisplaySettings();
     getScale: () => scale,
     getProfile: () => renderProfileId,
     isEnabled: () => Boolean(modules['world_map.tooltips']),
+    isPylonsVisible: () => Boolean(modules['world_map.pylons'] && mapDisplaySettings.pylons),
     getPlayerPoint: (player) => mapEntityLayer.markerPosition(player),
   });
   // Diagnostics UI is created only on the dedicated debug route.
@@ -405,144 +403,6 @@ const mapDisplaySettings = readMapDisplaySettings();
       : [];
     routeLayer.render(playerPaths.withPaths(routedPlayers, data.world), data.players || []);
   };
-  const renderToggles = () => {
-    const signature = JSON.stringify(
-      (data.players || []).map((player, index) => [
-        player.id,
-        player.name,
-        player.avatar_url,
-        playerOptions(player),
-        index,
-      ]),
-    );
-    if (signature === toggleKey) return;
-    toggleKey = signature;
-    const buildNav = (nav) => {
-      nav.replaceChildren();
-      const label = document.createElement('span');
-      label.className = 'players-label';
-      label.textContent = 'Игроки:';
-      nav.append(label);
-      const routeToolbar = document.createElement('span');
-      routeToolbar.className = 'route-toolbar';
-      const routePeriodSelect = document.createElement('select');
-      routePeriodSelect.className = 'route-period';
-      routePeriodSelect.setAttribute('aria-label', 'Период линий маршрутов');
-      for (const [value, title] of [
-        ['24h', '24 часа'],
-        ['7d', '7 дней'],
-        ['30d', '30 дней'],
-      ]) {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = title;
-        routePeriodSelect.append(option);
-      }
-      routePeriodSelect.value = routePeriod;
-      routePeriodSelect.addEventListener('change', () => {
-        routePeriod = routePeriodSelect.value;
-        try {
-          localStorage.setItem('terraria-world-map-route-period', routePeriod);
-        } catch {}
-        document.querySelectorAll<HTMLSelectElement>('.route-period').forEach((select) => {
-          select.value = routePeriod;
-        });
-        document.querySelectorAll<HTMLButtonElement>('.route-load').forEach((button) => {
-          button.textContent = routeLoadButtonLabel();
-        });
-      });
-      const routeLoadButton = document.createElement('button');
-      routeLoadButton.type = 'button';
-      routeLoadButton.className = 'route-load';
-      routeLoadButton.textContent = routeLoadButtonLabel();
-      routeLoadButton.addEventListener('click', async () => {
-        const routePlayerIds = selectedRoutePlayerIds();
-        if (!routePlayerIds.length) {
-          status('Сначала выбери игроков, чьи маршруты нужно загрузить.');
-          return;
-        }
-        routeLoadButton.disabled = true;
-        status('Загружаю маршруты и собираю маски карты…');
-        try {
-          await requestAndRenderProfile(routePlayerIds, routePeriod);
-        } catch (error) {
-          status(
-            `Не удалось загрузить маршруты: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        } finally {
-          document.querySelectorAll<HTMLButtonElement>('.route-load').forEach((button) => {
-            button.disabled = false;
-            button.textContent = routeLoadButtonLabel();
-          });
-        }
-      });
-      routeToolbar.append(routePeriodSelect, routeLoadButton);
-      nav.append(routeToolbar);
-      for (const [index, player] of (data.players || []).entries()) {
-        const options = playerOptions(player),
-          color = colors[index % colors.length],
-          control = document.createElement('span');
-        control.className = 'player-control';
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'player-toggle';
-        button.setAttribute('aria-pressed', String(options.explore));
-        button.setAttribute(
-          'aria-label',
-          `${options.explore ? 'Скрыть' : 'Показать'} исследованную область игрока ${player.name || 'Игрок'}`,
-        );
-        button.title = 'Показать или скрыть исследованную область';
-        button.append(mapEntityLayer.makeAvatar(player));
-        const name = document.createElement('span');
-        name.textContent = player.name || 'Игрок';
-        button.append(name);
-        const dot = document.createElement('i');
-        dot.style.cssText = `width:9px;height:9px;border-radius:50%;background:${color}`;
-        button.insertBefore(dot, name);
-        button.addEventListener('click', () => {
-          toggleState[player.id] = { ...playerOptions(player), explore: !options.explore };
-          saveOptions();
-          const currentlyLoadedRoutes = [...activeRoutePlayerIds].filter(
-            (playerId) =>
-              playerOptions(data.players.find((item) => item.id === playerId) || { id: playerId })
-                .route,
-          );
-          void requestAndRenderProfile(currentlyLoadedRoutes, activeRoutePeriod);
-        });
-        const route = document.createElement('button');
-        route.type = 'button';
-        route.className = 'route-toggle';
-        route.setAttribute('aria-pressed', String(options.route));
-        route.setAttribute(
-          'aria-label',
-          `${options.route ? 'Убрать' : 'Выбрать'} маршрут игрока ${player.name || 'Игрок'} для загрузки`,
-        );
-        route.title = 'Выбрать маршрут для загрузки за выбранный период';
-        route.style.setProperty('--route-color', color);
-        const line = document.createElement('i');
-        line.className = 'route-sample';
-        route.append(line);
-        route.addEventListener('click', () => {
-          toggleState[player.id] = { ...playerOptions(player), route: !options.route };
-          saveOptions();
-          render();
-        });
-        control.append(button, route);
-        nav.append(control);
-      }
-      if (!(data.players || []).length) {
-        const empty = document.createElement('span');
-        empty.className = 'players-label';
-        empty.textContent = 'Игроков пока нет';
-        nav.append(empty);
-      }
-    };
-    buildNav($('players'));
-  };
-  const routeLoadButtonLabel = () => {
-    const periodTitle = { '24h': '24 часа', '7d': '7 дней', '30d': '30 дней' }[routePeriod];
-    return `Загрузить маршруты, ${periodTitle}`;
-  };
   const saveOptions = () => {
     try {
       localStorage.setItem('terraria-world-map-players', JSON.stringify(toggleState));
@@ -584,11 +444,7 @@ const mapDisplaySettings = readMapDisplaySettings();
     for (const playerId of activeRoutePlayerIds) {
       routeHistories.set(playerId, profile.routes?.[playerId] || []);
     }
-    routePeriod = period;
     activeRoutePeriod = period;
-    try {
-      localStorage.setItem('terraria-world-map-route-period', routePeriod);
-    } catch {}
 
     if (previousProfileId !== renderProfileId) {
       chunkLayerRenderer.clear();
@@ -608,6 +464,20 @@ const mapDisplaySettings = readMapDisplaySettings();
       );
     }
   };
+  window.addEventListener('terraria:player-layer-options', (event) => {
+    const detail = (event as CustomEvent<{ playerId?: string; explore?: boolean; route?: boolean }>)
+      .detail;
+    if (!detail?.playerId) return;
+    const previous = playerOptions({ id: detail.playerId });
+    toggleState[detail.playerId] = {
+      explore: typeof detail.explore === 'boolean' ? detail.explore : previous.explore,
+      route: typeof detail.route === 'boolean' ? detail.route : previous.route,
+    };
+    saveOptions();
+    const routeIds =
+      modules['world_map.routes'] && mapDisplaySettings.routes ? selectedRoutePlayerIds() : [];
+    void requestAndRenderProfile(routeIds, routePeriod);
+  });
   const updateMapImportOptions = () => {
     const select = $('map-import-player');
     if (!select) return;
@@ -766,6 +636,13 @@ const mapDisplaySettings = readMapDisplaySettings();
       );
       deathRenderKey = deathKey;
     }
+
+    const pylonsVisible = modules['world_map.pylons'] && mapDisplaySettings.pylons;
+    const nextPylonKey = pylonsVisible ? JSON.stringify(data.pylons || []) : 'off';
+    if (nextPylonKey !== pylonRenderKey) {
+      mapEntityLayer.drawPylons(pylonsVisible ? data.pylons : []);
+      pylonRenderKey = nextPylonKey;
+    }
   };
 
   const render = async () => {
@@ -792,11 +669,6 @@ const mapDisplaySettings = readMapDisplaySettings();
         : [];
     drawOverview();
     renderLiveLayers();
-    const pylonKey = modules['world_map.pylons'] ? JSON.stringify(data.pylons || []) : 'off';
-    if (pylonKey !== pylonRenderKey) {
-      mapEntityLayer.drawPylons(modules['world_map.pylons'] ? data.pylons : []);
-      pylonRenderKey = pylonKey;
-    }
     if (modules['world_map.spawn']) {
       mapEntityLayer.setWorld(data.world);
       mapEntityLayer.drawSpawn(data.world);
@@ -804,7 +676,6 @@ const mapDisplaySettings = readMapDisplaySettings();
     document.title = data.world?.name
       ? `Terraria — Карта мира: ${data.world.name}`
       : 'Terraria — Карта исследования';
-    renderToggles();
     updateMapImportOptions();
     const hasMap =
       Number(data.map_version || data.map_revision || 0) > 0 ||
@@ -932,7 +803,10 @@ const mapDisplaySettings = readMapDisplaySettings();
       updateMapBackground();
       let profile = null;
       if (explorationProfileChanged || !renderProfileId) {
-        const routeIds = sameWorld ? [...activeRoutePlayerIds] : [];
+        const routeIds =
+          sameWorld && modules['world_map.routes'] && mapDisplaySettings.routes
+            ? selectedRoutePlayerIds()
+            : [];
         profile = await requestMapRenderProfile(routeIds, activeRoutePeriod);
       }
       renderDebugPanel?.setData(next);

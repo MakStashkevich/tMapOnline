@@ -4,6 +4,8 @@
 
 ```yaml
 site:
+  world_map:
+    route_history_days: 7 # Длительность истории маршрутов в днях (1–365)
   pages:
     world_map: { enabled: true }
   sections:
@@ -16,6 +18,8 @@ site:
     world_map.exploration: true
     world_map.entities: true
 ```
+
+Когда в карточке игрока включён чекбокс «История маршрута», карта автоматически загружает маршрут за `site.world_map.route_history_days`. Допустимый срок — от 1 до 365 дней.
 
 Параметры истории и частоты телеметрии:
 

@@ -4,7 +4,7 @@
 
 - Keep `app-shell.ts` responsible for navigation and application-wide presentation. Put page behavior in page controllers and keep map rendering, cache, viewport input, tooltips, and API access in focused objects under `web/src`.
 - Treat each section module as a small feature boundary: it owns its data request and DOM for that section, while shared shell state stays in the shell.
-- Keep `TerrariaTunnelTelemetrySystem` as the tModLoader lifecycle/composition boundary. It may register hooks and coordinate collaborators, but put networking, player appearance export, map scanning, localization lookup, and snapshot composition in focused classes.
+- Keep `TerrariaWorldViewerTelemetrySystem` as the tModLoader lifecycle/composition boundary. It may register hooks and coordinate collaborators, but put networking, player appearance export, map scanning, localization lookup, and snapshot composition in focused classes.
 - Game API reads and writes must stay on the tModLoader-owned thread unless the API explicitly guarantees thread safety. Background services receive immutable serialized data, not live Terraria objects.
 - Preserve the existing JSONL schema, HTTP API, storage formats, and gameplay behavior during structural changes. Any contract change must be explicit and update the producer and consumer together.
 - Prefer objects that own state and behavior together. Avoid static utility collections, giant page controllers, and partial classes used only to split a long file.

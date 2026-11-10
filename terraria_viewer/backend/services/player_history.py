@@ -22,11 +22,18 @@ from ...sprite_renderer import PlayerAppearance
 
 
 class PlayerHistoryMixin(StoreMixinContract):
+    EVENT_GROUP_WINDOW_SECONDS = 24 * 60 * 60
+
     def _load_events(self) -> None:
         try:
             loaded = as_json_array(json.loads(self._events_file.read_text(encoding="utf-8")))
-            self._events = [self._normalize_event(as_json_object(event)) for event in loaded if isinstance(event, dict)]
-            if self._prune_events_locked(time.time()):
+            normalized = [
+                self._normalize_event(as_json_object(event))
+                for event in loaded
+                if isinstance(event, dict)
+            ]
+            self._events = self._group_loaded_events(normalized)
+            if self._prune_events_locked(time.time()) or len(self._events) != len(normalized):
                 self._save_events_locked()
         except (OSError, ValueError, TypeError):
             self._events = []
@@ -48,14 +55,56 @@ class PlayerHistoryMixin(StoreMixinContract):
         normalized = dict(event)
         message = str(normalized.get("message", ""))
         normalized["severity"] = cls._severity(str(normalized.get("source", "")), message)
+        timestamp = float(normalized.get("time", 0) or 0)
+        normalized["time"] = timestamp
+        normalized["first_time"] = float(normalized.get("first_time", timestamp) or timestamp)
+        normalized["occurrences"] = max(1, int(normalized.get("occurrences", 1) or 1))
         return normalized
+
+    @staticmethod
+    def _event_signature(event: dict[str, Any]) -> tuple[str, str]:
+        return (
+            " ".join(str(event.get("source", "")).split()).casefold(),
+            " ".join(str(event.get("message", "")).split()).casefold(),
+        )
+
+    @classmethod
+    def _merge_event_occurrence(
+        cls,
+        grouped: dict[str, Any],
+        occurrence: dict[str, Any],
+    ) -> None:
+        grouped["time"] = max(float(grouped.get("time", 0)), float(occurrence.get("time", 0)))
+        grouped["first_time"] = min(
+            float(grouped.get("first_time", grouped["time"])),
+            float(occurrence.get("first_time", occurrence.get("time", 0))),
+        )
+        grouped["occurrences"] = int(grouped.get("occurrences", 1)) + int(
+            occurrence.get("occurrences", 1)
+        )
+
+    @classmethod
+    def _group_loaded_events(cls, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: list[dict[str, Any]] = []
+        latest_by_signature: dict[tuple[str, str], dict[str, Any]] = {}
+        for event in sorted(events, key=lambda item: float(item.get("time", 0))):
+            signature = cls._event_signature(event)
+            previous = latest_by_signature.get(signature)
+            first_time = float(event.get("first_time", event.get("time", 0)))
+            previous_first_time = float(previous.get("first_time", 0)) if previous else 0
+            if previous and first_time - previous_first_time <= cls.EVENT_GROUP_WINDOW_SECONDS:
+                cls._merge_event_occurrence(previous, event)
+                continue
+            grouped_event = dict(event)
+            grouped.append(grouped_event)
+            latest_by_signature[signature] = grouped_event
+        return grouped
 
     @classmethod
     def _severity(cls, source: str, message: str) -> str:
         lowered = message.lower()
         if (
-            source == "SSH"
-            or "[warn]" in lowered
+            "[warn]" in lowered
             or any(marker in lowered for marker in cls.WARNING_MARKERS)
         ):
             return "warning"

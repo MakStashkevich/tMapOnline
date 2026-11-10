@@ -8,7 +8,7 @@ type SectionContent = { root: HTMLElement; title: string; dataRoot: HTMLElement 
 
 const sections: Record<SectionView, { title: string; loader: () => Promise<SectionModule> }> = {
   world: { title: 'Данные мира', loader: () => import('./sections/world') },
-  players: { title: 'Игроки и слои карты', loader: () => import('./sections/players') },
+  players: { title: 'Игроки и маршруты', loader: () => import('./sections/players') },
   bosses: { title: 'Победы над боссами', loader: () => import('./sections/bosses') },
   server: { title: 'Состояние сервера', loader: () => import('./sections/server') },
   activity: { title: 'События и нагрузка', loader: () => import('./sections/activity') },
@@ -19,10 +19,7 @@ const categories: MapCategory[] = [
     id: 'players',
     label: 'Игроки',
     icon: 'player',
-    actions: [
-      { id: 'players', label: 'Игроки и слои карты', icon: 'player', view: 'players' },
-      { id: 'routes', label: 'Маршруты игроков', icon: 'routes', view: 'players' },
-    ],
+    actions: [{ id: 'players', label: 'Игроки и маршруты', icon: 'player', view: 'players' }],
   },
   {
     id: 'world',
@@ -105,13 +102,13 @@ class ViewerApplication {
     const view = action.view as SectionView;
     try {
       const content = await this.loadSection(view);
-      this.modal.open(content.title, content.root, trigger, view === 'players');
+      this.modal.open(content.title, content.root, trigger);
       window.dispatchEvent(new CustomEvent('terraria:view-change', { detail: { view: 'map' } }));
     } catch (error) {
       const panel = document.createElement('p');
       panel.className = 'section-error';
       panel.textContent = `Не удалось загрузить раздел: ${error instanceof Error ? error.message : String(error)}`;
-      this.modal.open(sections[view].title, panel, trigger, view === 'players');
+      this.modal.open(sections[view].title, panel, trigger);
     }
   }
 

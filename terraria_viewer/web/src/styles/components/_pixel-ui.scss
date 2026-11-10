@@ -280,6 +280,9 @@ body {
 .pixel-modal-frame {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   max-height: calc(min(78dvh, 760px) - 16px);
 }
 .pixel-modal-header {
@@ -331,16 +334,24 @@ body {
 .pixel-modal-content {
   display: flex;
   flex: 1;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
   min-height: 60px;
-  padding: 12px 8px 8px;
-  overflow: auto;
+  padding: 12px 12px 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
 }
 .pixel-section-content {
   display: grid;
-  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
   min-height: 0;
 }
 .pixel-modal-content:focus {
@@ -363,28 +374,6 @@ body {
   background: #202f65;
   border: 2px solid #465c9d;
   box-shadow: inset 0 0 0 1px #121d45;
-}
-.pixel-modal .map-layers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 0 12px;
-  border: 0;
-}
-.pixel-modal .map-layers {
-  align-items: flex-start;
-  min-height: 0;
-  overflow: visible;
-}
-.pixel-modal .players-label {
-  flex-basis: 100%;
-  color: #bdcaff;
-}
-.pixel-modal .player-control {
-  min-height: 40px;
-  padding: 3px;
-  border: 2px solid #5268a8;
-  background: #202f65;
 }
 .map-display-settings {
   display: grid;
@@ -477,40 +466,62 @@ body {
   outline: 2px solid #ffe56a;
   outline-offset: 3px;
 }
-.pixel-modal .player-toggle {
-  min-height: 36px;
-  color: #fff;
-}
-.pixel-modal .route-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-}
-.pixel-modal .route-load,
-.pixel-modal .route-period {
-  min-height: 36px;
-  padding: 5px 8px;
-  color: #fff;
-  background: #26366f;
-  border: 2px solid #5268a8;
-}
-.pixel-modal .player-toggle,
-.pixel-modal .route-toggle,
-.pixel-modal .route-load,
-.pixel-modal .route-period,
 .pixel-modal button,
 .pixel-modal select {
   border-radius: 0;
 }
-.pixel-modal .player-control {
+.pixel-modal .section-content {
+  gap: 16px;
+}
+.pixel-modal .player-cards {
+  gap: 12px;
+  padding-bottom: 4px;
+}
+.player-map-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 10px 0;
+  padding: 8px 10px 10px;
+  color: #bdcaff;
+  border: 2px solid #465c9d;
+}
+.player-map-options legend {
+  padding: 0 5px;
+  color: #eef2ff;
+}
+.player-map-option {
   display: inline-flex;
-  gap: 4px;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  cursor: pointer;
+}
+.player-map-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #f2d34b;
 }
 
 .section-content {
   display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+}
+.section-content > *,
+.pixel-section-content > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.section-data-content {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 .player-cards,
 .metric-grid,
@@ -618,7 +629,21 @@ body {
   color: #c3cff7;
 }
 .metric-grid {
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+.metric-card,
+.chart-card,
+.chart-grid,
+.section-block,
+.event-list,
+.event-row {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+.chart-card svg {
+  max-width: 100%;
 }
 .metric-card strong {
   display: block;
@@ -770,10 +795,6 @@ body {
   height: 40px;
   min-height: 40px;
 }
-.pixel-modal .player-toggle,
-.pixel-modal .route-toggle,
-.pixel-modal .route-load,
-.pixel-modal .route-period,
 .pixel-modal button:not(.pixel-modal-close),
 .map-utility-group .pixel-button {
   border-radius: 0;
@@ -848,7 +869,6 @@ body {
   width: 24px;
   height: 24px;
 }
-.pixel-modal .viewer-card,
 .pixel-modal .scan-panel,
 .pixel-modal .setting-option,
 .pixel-modal .section-summary,
@@ -860,6 +880,7 @@ body {
   border-image: url('/assets/ui/larchrow/components/panel_dark_48x48.png') 6 fill / 6px stretch;
   background: transparent;
   box-shadow: none;
+  padding-bottom: 12px;
 }
 
 @media (max-width: 600px) {
@@ -893,6 +914,18 @@ body {
   }
   .pixel-modal-frame {
     max-height: calc(min(76dvh, 700px) - 16px);
+  }
+}
+
+@media (max-width: 520px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 360px) {
+  .metric-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

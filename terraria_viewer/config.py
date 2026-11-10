@@ -17,7 +17,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_players": 8,
     },
     "storage": {
-        "data_dir": "~/Library/Application Support/TerrariaTunnel",
+        "data_dir": "~/Library/Application Support/TerrariaWorldViewer",
         "death_retention_seconds": 3600,
         "event_retention_seconds": 2592000,
         "event_max_entries": 5000,
@@ -37,8 +37,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "browser_map_poll_interval_ms": 5000,
         "browser_debug_poll_interval_ms": 1000,
     },
-    "tunnel_status_file": "~/Library/Application Support/TerrariaTunnel/tunnel-status.json",
     "site": {
+        "world_map": {"route_history_days": 7},
         "pages": {
             "world_map": {"enabled": True},
         },
@@ -102,6 +102,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
     event_max_entries = config["storage"].get("event_max_entries")
     if type(event_max_entries) is not int or event_max_entries < 1:
         raise ValueError("storage.event_max_entries must be a positive integer")
+    route_history_days = config["site"].get("world_map", {}).get("route_history_days")
+    if type(route_history_days) is not int or not 1 <= route_history_days <= 365:
+        raise ValueError("site.world_map.route_history_days must be an integer from 1 to 365")
     for key in (
         "player_position_interval_ticks",
         "entity_interval_ticks",

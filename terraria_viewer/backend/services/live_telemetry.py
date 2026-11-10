@@ -198,6 +198,10 @@ class LiveTelemetryMixin(StoreMixinContract):
             eclipse=world.get("eclipse"),
             raining=world.get("raining"),
             slime_rain=world.get("slimeRain"),
+            active_bosses=world.get("activeBosses", []),
+            defeated_bosses=world.get("defeatedBosses", []),
+            boss_defeat_counts=world.get("bossDefeatCounts", {}),
+            boss_status=world.get("bossStatus", {}),
             telemetry_updated_at=telemetry.generated_at,
         )
         self.notify_live_update()
@@ -468,12 +472,27 @@ class LiveTelemetryMixin(StoreMixinContract):
             self._save_metrics_locked()
 
     def _append_event_locked(self, source: str, message: str, now: float) -> None:
-        self._events.append({
+        normalized_message = " ".join(message.strip().split())[:400]
+        candidate = {
             "time": now,
+            "first_time": now,
             "source": source,
-            "message": " ".join(message.strip().split())[:400],
-            "severity": self._severity(source, message),
-        })
+            "message": normalized_message,
+            "severity": self._severity(source, normalized_message),
+            "occurrences": 1,
+        }
+        signature = self._event_signature(candidate)
+        for existing in reversed(self._events):
+            first_time = float(existing.get("first_time", existing.get("time", 0)) or 0)
+            if (
+                self._event_signature(existing) == signature
+                and now - first_time <= self.EVENT_GROUP_WINDOW_SECONDS
+            ):
+                existing["time"] = now
+                existing["occurrences"] = int(existing.get("occurrences", 1) or 1) + 1
+                break
+        else:
+            self._events.append(candidate)
         self._prune_events_locked(now)
 
     def record_error(self, source: str, message: str) -> None:

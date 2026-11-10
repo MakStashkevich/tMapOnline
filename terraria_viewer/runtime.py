@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import signal
@@ -10,7 +9,7 @@ import threading
 import time
 import platform
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .backend.http import ServerLogFollower, start_dashboard
 from .backend.store import StatusStore
@@ -81,14 +80,6 @@ def _server_command(config: dict[str, Any]) -> tuple[list[str], Path]:
         command.insert(0, "/usr/bin/arch")
         command.insert(1, "-x86_64")
     return command, game_dir
-
-
-def _read_tunnel_status(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return cast(dict[str, Any], value) if isinstance(value, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
 
 
 def _game_listener_is_open(port: int) -> bool:
@@ -185,7 +176,7 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
     game_config = config["terraria"]
     store = _make_store(config)
     store.set_server_info(port=game_config["game_port"], max_players=game_config["max_players"], world=_path(game_config["world"]).stem)
-    store.update(game_running=False, listener_up=False, tunnel_ready=False, game_started_at=None, tunnel_reconnecting=False)
+    store.update(game_running=False, listener_up=False, game_started_at=None)
     dashboard = start_dashboard(store, server_config["port"], config.get("site", {}), server_config["host"])
     logger.info("Viewer listening at http://%s:%s", server_config["host"], server_config["port"])
     def handle_telemetry_connection(connected: bool) -> None:
@@ -227,16 +218,14 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
                 logger.exception("Initial tModLoader launch failed; automatic retry is enabled.")
             else:
                 logger.info(
-                    "Started local tModLoader process %s; waiting for TCP port %s. SSH tunnel is not managed here.",
+                    "Started local tModLoader process %s; waiting for TCP port %s.",
                     game_process.pid,
                     game_config["game_port"],
                 )
         else:
             log_follower = None
 
-        tunnel_status_path = _path(config.get("tunnel_status_file", "~/Library/Application Support/TerrariaTunnel/tunnel-status.json"))
         while not STOP.is_set():
-            now = time.time()
             monotonic_now = time.monotonic()
             listener_up = _game_listener_is_open(game_config["game_port"])
 
@@ -316,7 +305,6 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
                 store.update(
                     game_running=process_alive,
                     listener_up=listener_up,
-                    tunnel_ready=False,
                     game_started_at=game_started,
                 )
 
@@ -340,19 +328,10 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
                     logger.info("Restarted local tModLoader process %s.", game_process.pid)
                 continue
 
-            tunnel_status = _read_tunnel_status(tunnel_status_path)
-            tunnel_updated = float(tunnel_status.get("updated_at", 0) or 0)
-            tunnel_fresh = now - tunnel_updated < 30
-            tunnel_ready = tunnel_fresh and tunnel_status.get("connected") is True
             store.update(
-                tunnel_ready=tunnel_ready,
                 game_running=game_process is not None and game_process.poll() is None,
                 listener_up=listener_up,
                 game_started_at=game_started,
-                tunnel_reconnecting=tunnel_fresh and tunnel_status.get("reconnecting") is True,
-                network_interface=tunnel_status.get("interface"),
-                network_gateway=tunnel_status.get("gateway"),
-                vpn_active=tunnel_status.get("tun_active") is True,
             )
             STOP.wait(1)
         return 0
@@ -362,7 +341,7 @@ def run_local(config: dict[str, Any], *, run_game: bool) -> int:
         telemetry.stop()
         if game_log_handle is not None:
             game_log_handle.close()
-        store.update(game_running=False, listener_up=False, tunnel_ready=False, game_started_at=game_started, tunnel_reconnecting=False)
+        store.update(game_running=False, listener_up=False, game_started_at=game_started)
         dashboard.shutdown()
         dashboard.server_close()
 

@@ -3,7 +3,6 @@ export class PixelModal {
   private readonly title: HTMLElement;
   private readonly content: HTMLElement;
   private readonly focusTarget: HTMLElement;
-  private readonly playerLayers: HTMLElement;
   private returnFocus: HTMLElement | null = null;
 
   constructor() {
@@ -11,7 +10,6 @@ export class PixelModal {
     this.title = document.querySelector<HTMLElement>('#pixel-modal-title')!;
     this.content = document.querySelector<HTMLElement>('#pixel-section-content')!;
     this.focusTarget = document.querySelector<HTMLElement>('#pixel-modal-content')!;
-    this.playerLayers = document.querySelector<HTMLElement>('#pixel-player-layer-panel')!;
     this.dialog.querySelector('.pixel-modal-close')?.addEventListener('click', () => this.close());
     this.dialog.addEventListener('click', (event) => {
       if (event.target === this.dialog) this.close();
@@ -25,11 +23,10 @@ export class PixelModal {
     });
   }
 
-  open(title: string, content: HTMLElement, trigger: HTMLElement, showPlayerLayers = false): void {
+  open(title: string, content: HTMLElement, trigger: HTMLElement): void {
     this.returnFocus = trigger;
     this.title.textContent = title;
     this.content.replaceChildren(content);
-    this.playerLayers.hidden = !showPlayerLayers;
     this.dialog.showModal();
     document.body.classList.add('modal-open');
     this.focusTarget.focus();

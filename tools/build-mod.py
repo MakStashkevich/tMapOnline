@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    project = Path(__file__).resolve().parents[1] / "tmodloader" / "TerrariaTunnelTelemetry"
+    project = Path(__file__).resolve().parents[1] / "tmodloader" / "TerrariaWorldViewerTelemetry"
     default_tml = Path.home() / "Library/Application Support/Steam/steamapps/common/tModLoader"
     tml_root = Path(os.environ.get("TML_ROOT", str(default_tml))).expanduser().resolve()
     if not (tml_root / "tModLoader.dll").is_file() or not (tml_root / "tMLMod.targets").is_file():
@@ -22,11 +22,11 @@ def main() -> int:
     env.setdefault("DOTNET_ROLL_FORWARD", "Major")
     with tempfile.TemporaryDirectory(prefix="terraria-viewer-mod-profile-") as isolated_home:
         env["HOME"] = isolated_home
-        command = ["dotnet", "build", str(project / "TerrariaTunnelTelemetry.csproj"), f"-p:TmlRoot={tml_root}"]
+        command = ["dotnet", "build", str(project / "TerrariaWorldViewerTelemetry.csproj"), f"-p:TmlRoot={tml_root}"]
         result = subprocess.run(command, cwd=project, env=env)
         if result.returncode:
             return result.returncode
-        packages = list(Path(isolated_home).rglob("TerrariaTunnelTelemetry.tmod"))
+        packages = list(Path(isolated_home).rglob("TerrariaWorldViewerTelemetry.tmod"))
         if len(packages) != 1:
             print(f"Expected one packaged mod in isolated profile, found {len(packages)}.", file=sys.stderr)
             return 1

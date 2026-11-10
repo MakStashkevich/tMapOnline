@@ -29,7 +29,6 @@ class ViewerRuntimeTests(unittest.TestCase):
             config["server"]["port"] = unused_port()
             config["server"]["telemetry_port"] = unused_port()
             config["storage"]["data_dir"] = str(root / "data")
-            config["tunnel_status_file"] = str(root / "tunnel-status.json")
             STOP.clear()
             worker = threading.Thread(target=run_local, args=(config,), kwargs={"run_game": False}, daemon=True)
             worker.start()

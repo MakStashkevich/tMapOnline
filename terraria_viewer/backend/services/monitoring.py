@@ -7,11 +7,8 @@ from ...models import PlayerSnapshot
 from ..store_common import (
     Any,
     StoreMixinContract,
-    GAME_PORT,
     HISTORY_RETENTION_SECONDS,
     HISTORY_SAMPLE_INTERVAL,
-    VPS_HOST,
-    VPS_IP,
     is_valid_player_name,
     time,
 )
@@ -163,16 +160,10 @@ class MonitoringMixin(StoreMixinContract):
         *,
         game_running: bool,
         listener_up: bool,
-        tunnel_ready: bool,
         game_started_at: float | None,
-        tunnel_reconnecting: bool = False,
-        network_interface: str | None = None,
-        network_gateway: str | None = None,
-        vpn_active: bool = False,
     ) -> None:
         now = time.time()
         with self._lock:
-            was_tunnel_ready = self._tunnel_ready
             was_game_running = self._game_running
             if was_game_running and not game_running and self._online_player_ids:
                 for player_id in self._online_player_ids:
@@ -190,23 +181,9 @@ class MonitoringMixin(StoreMixinContract):
                     "tModLoader", "Локальный слушатель TCP 7777 пропал во время работы сервера.", now
                 )
                 self._save_events_locked()
-            if self._tunnel_ready and not tunnel_ready and game_running:
-                self._append_event_locked(
-                    "SSH", "Проверка SSH ControlMaster не прошла; туннель переподключается.", now
-                )
-                self._save_events_locked()
             self._game_running = game_running
             self._listener_up = listener_up
-            self._tunnel_ready = tunnel_ready
-            self._tunnel_reconnecting = tunnel_reconnecting
-            self._network_interface = network_interface
-            self._network_gateway = network_gateway
-            self._vpn_active = vpn_active
             self._game_started_at = game_started_at
-            if tunnel_ready and not was_tunnel_ready:
-                self._tunnel_started_at = now
-            elif not tunnel_ready:
-                self._tunnel_started_at = None
             self._updated_at = now
 
             last_sample = float(self._history[-1]["time"]) if self._history else 0
@@ -215,10 +192,6 @@ class MonitoringMixin(StoreMixinContract):
                     "time": now,
                     "game_running": game_running,
                     "listening": listener_up,
-                    "tunnel_connected": tunnel_ready,
-                    "tunnel_reconnecting": tunnel_reconnecting,
-                    "route_available": network_interface is not None,
-                    "vpn_active": vpn_active,
                     "monitor_available": True,
                     "cpu_percent": self._host_metrics.get("cpu_percent"),
                     "memory_mb": self._host_metrics.get("memory_mb"),
@@ -252,13 +225,7 @@ class MonitoringMixin(StoreMixinContract):
             history = list(self._history)
             game_running = self._game_running
             listener_up = self._listener_up
-            tunnel_ready = self._tunnel_ready
-            tunnel_reconnecting = self._tunnel_reconnecting
-            network_interface = self._network_interface
-            network_gateway = self._network_gateway
-            vpn_active = self._vpn_active
             game_started_at = self._game_started_at
-            tunnel_started_at = self._tunnel_started_at
             updated_at = self._updated_at
             players_online = self._players_online
             player_names = self._player_names
@@ -290,26 +257,6 @@ class MonitoringMixin(StoreMixinContract):
                 "player_names": player_names,
                 "players_checked_at": players_checked_at,
             },
-            "tunnel": {
-                "connected": tunnel_ready,
-                "reconnecting": tunnel_reconnecting,
-                "connected_since": tunnel_started_at,
-                "uptime_seconds": max(0, now - tunnel_started_at) if tunnel_ready and tunnel_started_at else 0,
-            },
-            "network": {
-                "interface": network_interface,
-                "gateway": network_gateway,
-                "route_available": network_interface is not None,
-                "vpn_active": vpn_active,
-            },
-            "connection": {
-                "hostname": VPS_HOST,
-                "ip": VPS_IP,
-                "game_port": GAME_PORT,
-                "game_address": f"{VPS_HOST}:{GAME_PORT}",
-                "dashboard_url": f"https://{VPS_HOST}/",
-                "external_game_port_verified": False,
-            },
             "errors": events,
             "history": history,
             "player_analytics": {
@@ -336,10 +283,6 @@ class MonitoringMixin(StoreMixinContract):
                     "players_online": self._players_online,
                     "player_names": list(self._player_names or []),
                     "players_checked_at": self._players_checked_at,
-                },
-                "tunnel": {
-                    "connected": self._tunnel_ready,
-                    "reconnecting": self._tunnel_reconnecting,
                 },
                 "server_info": {
                     key: server_info.get(key)
@@ -394,11 +337,15 @@ class MonitoringMixin(StoreMixinContract):
                     "section": section,
                     "updated_at": now,
                     "bosses": bosses,
+                    "active_bosses": list(self._server_info.get("active_bosses") or []),
+                    "defeated_bosses": list(self._server_info.get("defeated_bosses") or []),
+                    "boss_defeat_counts": dict(self._server_info.get("boss_defeat_counts") or {}),
+                    "boss_status": dict(self._server_info.get("boss_status") or {}),
                 }
 
             if section == "server":
                 server_info_keys = (
-                    "world", "world_width", "world_height", "version", "telemetry_connected",
+                    "world", "world_width", "world_height", "version", "port", "telemetry_connected",
                     "telemetry_updated_at", "game_mode", "crimson", "hardmode", "day",
                     "world_time", "game_time",
                 )
@@ -414,34 +361,22 @@ class MonitoringMixin(StoreMixinContract):
                         "player_names": list(self._player_names or []),
                         "players_checked_at": self._players_checked_at,
                     },
-                    "tunnel": {
-                        "connected": self._tunnel_ready,
-                        "reconnecting": self._tunnel_reconnecting,
-                        "connected_since": self._tunnel_started_at,
-                    },
-                    "network": {
-                        "interface": self._network_interface,
-                        "gateway": self._network_gateway,
-                        "route_available": self._network_interface is not None,
-                        "vpn_active": self._vpn_active,
-                    },
                     "server_info": {key: self._server_info.get(key) for key in server_info_keys},
                     "host_metrics": dict(self._host_metrics),
-                    "connection": {
-                        "hostname": VPS_HOST,
-                        "ip": VPS_IP,
-                        "game_port": GAME_PORT,
-                        "game_address": f"{VPS_HOST}:{GAME_PORT}",
-                        "dashboard_url": f"https://{VPS_HOST}/",
-                    },
                 }
 
             if section == "activity":
                 cutoff = now - 24 * 60 * 60
+                events = [
+                    dict(event)
+                    for event in self._events
+                    if event.get("time", 0) >= cutoff
+                ]
+                events.sort(key=lambda event: float(event.get("time", 0) or 0), reverse=True)
                 return {
                     "section": section,
                     "updated_at": now,
-                    "events": [dict(event) for event in self._events if event.get("time", 0) >= cutoff],
+                    "events": events[:50],
                     "health": [dict(sample) for sample in self._history if sample.get("time", 0) >= cutoff],
                     "host_metrics": dict(self._host_metrics),
                 }

@@ -10,7 +10,7 @@ terraria:
   game_port: 7777
   max_players: 8
 storage:
-  data_dir: ~/Library/Application Support/TerrariaTunnel
+  data_dir: ~/Library/Application Support/TerrariaWorldViewer
   death_retention_seconds: 3600
   event_retention_seconds: 2592000
   event_max_entries: 5000
@@ -28,8 +28,9 @@ telemetry:
   browser_overview_poll_interval_ms: 500
   browser_map_poll_interval_ms: 5000
   browser_debug_poll_interval_ms: 1000
-tunnel_status_file: ~/Library/Application Support/TerrariaTunnel/tunnel-status.json
 site:
+  world_map:
+    route_history_days: 7 # Сколько дней истории загружать для включённых маршрутов
   pages:
     world_map:
       enabled: true

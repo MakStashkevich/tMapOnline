@@ -380,9 +380,13 @@ class WorldMapMixin(StoreMixinContract):
         full_map: bool = False,
     ) -> dict[str, Any]:
         """Build per-player masks and return their combined map render profile."""
-        period_seconds = {"24h": 24 * 60 * 60, "7d": 7 * 24 * 60 * 60, "30d": 30 * 24 * 60 * 60}.get(period)
-        if period_seconds is None:
-            raise ValueError("Период маршрута должен быть 24h, 7d или 30d.")
+        try:
+            days = int(period[:-1]) if period.endswith("d") else 0
+        except ValueError:
+            days = 0
+        if not 1 <= days <= 365:
+            raise ValueError("Период маршрута должен быть от 1 до 365 дней.")
+        period_seconds = days * 24 * 60 * 60
 
         explore_ids = {player_id for player_id in explore_player_ids if player_id and len(player_id) <= 128}
         route_ids = {player_id for player_id in route_player_ids if player_id and len(player_id) <= 128}

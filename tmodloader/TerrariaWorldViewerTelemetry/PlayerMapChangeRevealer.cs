@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Terraria;
 
-namespace TerrariaTunnelTelemetry;
+namespace TerrariaWorldViewerTelemetry;
 
 /// <summary>Reveals deferred world conversions only when an online player visits them.</summary>
 internal sealed class PlayerMapChangeRevealer

@@ -1,4 +1,4 @@
-displayName = Terraria Tunnel Telemetry
+displayName = Terraria World Viewer Telemetry
 author = MakStashkevich
 version = 1.0.0
 side = Server

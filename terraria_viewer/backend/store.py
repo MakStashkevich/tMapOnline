@@ -18,9 +18,6 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
     WARNING_MARKERS = (
         "no route to host",
         "nodename nor servname provided, or not known",
-        "проверка ssh controlmaster не прошла",
-        "процесс туннеля завершился с кодом",
-        "туннель переподключается",
         "silently caught exception",
         "at system.net.sockets.socket.",
     )
@@ -92,18 +89,16 @@ class StatusStore(PlayerHistoryMixin, MovementMixin, LiveTelemetryMixin, Monitor
             "world": None,
             "map_scan": None,
             "deaths_updated_at": None,
+            "active_bosses": [],
+            "defeated_bosses": [],
+            "boss_defeat_counts": {},
+            "boss_status": {},
         }
         self._host_metrics: dict[str, Any] = {}
         self._load_metrics()
         self._game_started_at: float | None = None
-        self._tunnel_started_at: float | None = None
-        self._tunnel_reconnecting = False
-        self._network_interface: str | None = None
-        self._network_gateway: str | None = None
-        self._vpn_active = False
         self._game_running = False
         self._listener_up = False
-        self._tunnel_ready = False
         self._players_online: int | None = None
         self._player_names: list[str] | None = None
         self._players_checked_at: float | None = None

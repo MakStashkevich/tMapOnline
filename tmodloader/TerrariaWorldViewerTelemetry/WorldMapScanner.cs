@@ -12,7 +12,7 @@ using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.Map;
 
-namespace TerrariaTunnelTelemetry;
+namespace TerrariaWorldViewerTelemetry;
 
 /// <summary>Scans the world in small chunks and emits Terraria-colored map data.</summary>
 internal sealed class WorldMapScanner

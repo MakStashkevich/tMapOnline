@@ -16,7 +16,7 @@ using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.GameContent;
 
-namespace TerrariaTunnelTelemetry;
+namespace TerrariaWorldViewerTelemetry;
 
 /// <summary>Builds the appearance payload and exports modded textures used by player snapshots.</summary>
 internal static class PlayerAppearanceSnapshotBuilder
@@ -65,7 +65,7 @@ internal static class PlayerAppearanceSnapshotBuilder
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         var assetDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "TerrariaTunnel", "mod-textures");
+            "TerrariaWorldViewer", "mod-textures");
         var visibleSlots = new Dictionary<string, (EquipType Type, int Slot)>(StringComparer.Ordinal);
         AddVisibleSlot(visibleSlots, "Head", EquipType.Head, ReadPlayerInt(player, "head"));
         AddVisibleSlot(visibleSlots, "Body", EquipType.Body, ReadPlayerInt(player, "body"));

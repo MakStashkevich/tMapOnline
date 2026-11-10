@@ -5,7 +5,7 @@ using System.IO.Compression;
 using Terraria;
 using Terraria.ID;
 
-namespace TerrariaTunnelTelemetry;
+namespace TerrariaWorldViewerTelemetry;
 
 /// <summary>Captures one chunk's block IDs and their current localized labels.</summary>
 internal sealed class MapTileDataCapture

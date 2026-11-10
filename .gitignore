@@ -12,3 +12,5 @@ node_modules/
 tmodloader/TerrariaTunnelTelemetry/bin/
 tmodloader/TerrariaTunnelTelemetry/obj/
 tmodloader/TerrariaTunnelTelemetry/*.tmod
+tmodloader/TerrariaWorldViewerTelemetry/bin/
+tmodloader/TerrariaWorldViewerTelemetry/obj/

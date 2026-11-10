@@ -13,7 +13,7 @@ using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.ModLoader.Default;
 
-namespace TerrariaTunnelTelemetry;
+namespace TerrariaWorldViewerTelemetry;
 
 /// <summary>Collects the world objects displayed as map markers in the Viewer.</summary>
 internal sealed class WorldEntitySnapshotBuilder
@@ -194,7 +194,7 @@ internal sealed class WorldEntitySnapshotBuilder
                 var digest = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
                 var directory = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "TerrariaTunnel", "npc-textures");
+                    "TerrariaWorldViewer", "npc-textures");
                 Directory.CreateDirectory(directory);
                 var destination = Path.Combine(directory, digest + ".png");
                 if (!File.Exists(destination)) File.WriteAllBytes(destination, bytes);

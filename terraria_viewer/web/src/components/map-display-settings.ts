@@ -3,6 +3,7 @@ export type MapDisplaySettings = {
   routes: boolean;
   npcs: boolean;
   bosses: boolean;
+  pylons: boolean;
   movement: boolean;
   interpolationMs: number;
   updateIntervalMs: number;
@@ -14,6 +15,7 @@ const defaults: MapDisplaySettings = {
   routes: true,
   npcs: true,
   bosses: true,
+  pylons: true,
   movement: true,
   interpolationMs: 160,
   updateIntervalMs: 250,
@@ -29,6 +31,7 @@ export function readMapDisplaySettings(): MapDisplaySettings {
       routes: value.routes !== false,
       npcs: value.npcs !== false,
       bosses: value.bosses !== false,
+      pylons: value.pylons !== false,
       movement: value.movement !== false,
       interpolationMs: clamp(value.interpolationMs, 80, 300, defaults.interpolationMs),
       updateIntervalMs: clamp(value.updateIntervalMs, 50, 1000, defaults.updateIntervalMs),
@@ -45,12 +48,19 @@ export function createMapDisplaySettingsPanel(): HTMLElement {
   panel.setAttribute('aria-label', 'Настройки отображения карты');
 
   const toggles: Array<
-    [keyof Pick<MapDisplaySettings, 'players' | 'routes' | 'npcs' | 'bosses' | 'movement'>, string]
+    [
+      keyof Pick<
+        MapDisplaySettings,
+        'players' | 'routes' | 'npcs' | 'bosses' | 'pylons' | 'movement'
+      >,
+      string,
+    ]
   > = [
     ['players', 'Игроки'],
     ['routes', 'Маршруты игроков'],
     ['npcs', 'Жители и NPC'],
     ['bosses', 'Боссы'],
+    ['pylons', 'Пилоны'],
     ['movement', 'Анимация перемещений'],
   ];
   for (const [key, label] of toggles) {

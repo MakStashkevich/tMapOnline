@@ -1,6 +1,10 @@
 type FeaturePage = 'world_map';
 type FeatureMap = Record<string, string[]>;
-type SiteConfig = { modules?: Record<string, boolean> };
+type SiteConfig = {
+  modules?: Record<string, boolean>;
+  world_map?: { route_history_days?: number };
+};
+type ActivatedModules = Record<string, boolean> & { routeHistoryDays: number };
 
 const targets: Record<FeaturePage, FeatureMap> = {
   world_map: {
@@ -16,7 +20,7 @@ const targets: Record<FeaturePage, FeatureMap> = {
   },
 };
 
-export async function activateModules(page: FeaturePage): Promise<Record<string, boolean>> {
+export async function activateModules(page: FeaturePage): Promise<ActivatedModules> {
   let config: SiteConfig;
   try {
     const response = await fetch('/api/site-config', { cache: 'no-store' });
@@ -37,5 +41,9 @@ export async function activateModules(page: FeaturePage): Promise<Record<string,
     }
   }
   document.documentElement.dataset.page = page;
-  return enabled;
+  const configuredDays = Number(config.world_map?.route_history_days);
+  const routeHistoryDays = Number.isInteger(configuredDays)
+    ? Math.max(1, Math.min(365, configuredDays))
+    : 7;
+  return Object.assign(enabled, { routeHistoryDays });
 }

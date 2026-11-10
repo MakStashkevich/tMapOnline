@@ -10,7 +10,7 @@ using System.Threading.Channels;
 using System.Threading.Tasks;
 using Terraria.ModLoader;
 
-namespace TerrariaTunnelTelemetry;
+namespace TerrariaWorldViewerTelemetry;
 
 /// <summary>Owns the local TCP stream that delivers the newest telemetry snapshot.</summary>
 internal sealed class TelemetryStreamServer : IDisposable
@@ -112,7 +112,7 @@ internal sealed class TelemetryStreamServer : IDisposable
                 client.Publish(latest);
 
             _ = client.RunAsync(cancellationToken);
-            _mod.Logger.Info($"Tunnel monitor connected ({_clients.Count} telemetry client(s)).");
+            _mod.Logger.Info($"World viewer connected ({_clients.Count} telemetry client(s)).");
         }
     }
 

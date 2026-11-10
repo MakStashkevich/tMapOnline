@@ -8,7 +8,7 @@ using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.Map;
 
-namespace TerrariaTunnelTelemetry;
+namespace TerrariaWorldViewerTelemetry;
 
 /// <summary>Resolves and streams localized tile and wall names for map chunks.</summary>
 internal sealed class MapTileNameCatalog

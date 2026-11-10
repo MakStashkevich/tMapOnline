@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-only HTTP dashboard for the Terraria tunnel supervisor."""
+"""Local-only HTTP dashboard for the Terraria world viewer."""
 
 from __future__ import annotations
 
@@ -29,35 +29,34 @@ GAME_LOG = (
     HOME
     / "Library/Application Support/Steam/steamapps/common/tModLoader/tModLoader-Logs/server.log"
 )
-EVENTS_FILE = HOME / "Library/Application Support/TerrariaTunnel/dashboard-events.json"
-HISTORY_FILE = HOME / "Library/Application Support/TerrariaTunnel/monitor-history.json"
-PLAYERS_FILE = HOME / "Library/Application Support/TerrariaTunnel/player-history.json"
-METRICS_FILE = HOME / "Library/Application Support/TerrariaTunnel/server-metrics.json"
-PLAYER_AVATARS_DIR = HOME / "Library/Application Support/TerrariaTunnel/player-avatars"
-NPC_SPRITES_DIR = HOME / "Library/Application Support/TerrariaTunnel/npc-sprites"
-NPC_TEXTURES_DIR = HOME / "Library/Application Support/TerrariaTunnel/npc-textures"
-MAP_SPRITES_DIR = HOME / "Library/Application Support/TerrariaTunnel/map-sprites"
+DATA_DIR = HOME / "Library/Application Support/TerrariaWorldViewer"
+EVENTS_FILE = DATA_DIR / "dashboard-events.json"
+HISTORY_FILE = DATA_DIR / "monitor-history.json"
+PLAYERS_FILE = DATA_DIR / "player-history.json"
+METRICS_FILE = DATA_DIR / "server-metrics.json"
+PLAYER_AVATARS_DIR = DATA_DIR / "player-avatars"
+NPC_SPRITES_DIR = DATA_DIR / "npc-sprites"
+NPC_TEXTURES_DIR = DATA_DIR / "npc-textures"
+MAP_SPRITES_DIR = DATA_DIR / "map-sprites"
 TERRARIA_CLIENT_IMAGES = Path(os.environ.get(
     "TERRARIA_CLIENT_IMAGES",
     str(HOME / "Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Content/Images"),
 ))
-PLAYER_MOVEMENTS_DIR = HOME / "Library/Application Support/TerrariaTunnel/player-movements"
+PLAYER_MOVEMENTS_DIR = DATA_DIR / "player-movements"
 HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
 HISTORY_SAMPLE_INTERVAL = 60
 AVATAR_RENDERER_VERSION = 7
 WORLD_MAP_FILE = Path(__file__).resolve().parents[1] / "web" / "world-map" / "index.html"
-VPS_HOST = "terka.stashkevich.com"
-VPS_IP = "5.187.0.105"
 GAME_PORT = 7777
 WORLD_MAP_CHUNK_SIZE = 64
-WORLD_MAP_EXPLORATION_DIR = HOME / "Library/Application Support/TerrariaTunnel/world-exploration"
+WORLD_MAP_EXPLORATION_DIR = DATA_DIR / "world-exploration"
 __all__ = [
-    "AVATAR_RENDERER_VERSION", "EVENTS_FILE", "GAME_LOG", "GAME_PORT",
+    "AVATAR_RENDERER_VERSION", "DATA_DIR", "EVENTS_FILE", "GAME_LOG", "GAME_PORT",
     "HISTORY_FILE", "HISTORY_RETENTION_SECONDS", "HISTORY_SAMPLE_INTERVAL", "HOME",
     "MAP_SPRITES_DIR", "METRICS_FILE", "NPC_SPRITES_DIR", "NPC_TEXTURES_DIR",
     "PLAYER_AVATARS_DIR", "PLAYER_MOVEMENTS_DIR", "PLAYER_NAME_PLACEHOLDERS",
     "PLAYERS_FILE",
-    "TERRARIA_CLIENT_IMAGES", "VPS_HOST", "VPS_IP", "WORLD_MAP_CHUNK_SIZE",
+    "TERRARIA_CLIENT_IMAGES", "WORLD_MAP_CHUNK_SIZE",
     "WORLD_MAP_EXPLORATION_DIR", "WORLD_MAP_FILE", "Any", "Path", "StoreMixinContract",
     "as_json_array", "as_json_object", "base64", "cast", "decode_player_map", "draw_route_mask",
     "encode_player_map_rows", "hashlib", "html", "is_valid_player_name", "is_valid_png",
@@ -77,6 +76,11 @@ class StoreMixinContract(Protocol):
 
     _lock: Any
     WARNING_MARKERS: tuple[str, ...]
+    EVENT_GROUP_WINDOW_SECONDS: int
+
+    @staticmethod
+    def _event_signature(event: dict[str, Any]) -> tuple[str, str]: ...
+
     _events_file: Path
     _history_file: Path
     _players_file: Path
@@ -111,14 +115,8 @@ class StoreMixinContract(Protocol):
     _server_info: dict[str, Any]
     _host_metrics: dict[str, Any]
     _game_started_at: float | None
-    _tunnel_started_at: float | None
-    _tunnel_reconnecting: bool
-    _network_interface: str | None
-    _network_gateway: str | None
-    _vpn_active: bool
     _game_running: bool
     _listener_up: bool
-    _tunnel_ready: bool
     _players_online: int | None
     _player_names: list[str] | None
     _players_checked_at: float | None

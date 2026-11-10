@@ -29,6 +29,11 @@ def main() -> None:
             "height": 2400,
             "gameMode": {"name": "expert"},
             "defeatedBosses": ["King Slime"],
+            "bossDefeatCounts": {"eye-of-cthulhu": 2},
+            "bossStatus": {
+                "calamityAvailable": True,
+                "calamityBosses": {"crabulon": True, "yharon": False},
+            },
         },
         "players": {
             "online": 1,
@@ -99,6 +104,11 @@ def main() -> None:
             raise AssertionError("Live player appearance was not applied to analytics.")
         if monitor_snapshot["server_info"]["defeated_bosses"] != ["King Slime"]:
             raise AssertionError("World progression was not applied to monitor state.")
+        boss_section = store.section_snapshot("bosses")
+        if boss_section["boss_defeat_counts"] != {"eye-of-cthulhu": 2}:
+            raise AssertionError("Repeat boss victory counts were not exposed in the boss section.")
+        if boss_section["boss_status"]["calamityBosses"]["crabulon"] is not True:
+            raise AssertionError("Optional mod boss status was not exposed in the boss section.")
         player_map = store.player_map("uuid:test-uuid")
         if player_map is None or player_map["worlds"]["42:telemetry-test"]["positions"][-1]["x"] != 123:
             raise AssertionError("Live player coordinates were not persisted to their world map.")

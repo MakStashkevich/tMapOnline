@@ -17,6 +17,7 @@ type MapTooltipBindings = {
   getScale(): number;
   getProfile(): string | null;
   isEnabled(): boolean;
+  isPylonsVisible(): boolean;
   getPlayerPoint(player: any): { x: number; y: number } | null;
 };
 
@@ -184,7 +185,7 @@ export class MapTooltipController {
       }
     }
 
-    for (const pylon of data.pylons || []) {
+    for (const pylon of this.bindings.isPylonsVisible() ? data.pylons || [] : []) {
       const type = String(pylon.type || '');
       const details = MapEntityLayer.pylonDetails(type) || [`${type || 'Пилон'}`];
       if (isNear(Number(pylon.x) + 0.5, Number(pylon.y) + 0.5, 20)) {
