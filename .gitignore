@@ -14,3 +14,7 @@ tmodloader/TerrariaTunnelTelemetry/obj/
 tmodloader/TerrariaTunnelTelemetry/*.tmod
 tmodloader/TerrariaWorldViewerTelemetry/bin/
 tmodloader/TerrariaWorldViewerTelemetry/obj/
+
+# tModLoader telemetry mod build output
+terraria_viewer/tmodloader/TerrariaWorldViewerTelemetry/bin/
+terraria_viewer/tmodloader/TerrariaWorldViewerTelemetry/obj/

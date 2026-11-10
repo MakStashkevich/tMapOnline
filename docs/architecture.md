@@ -13,10 +13,11 @@ terraria-world-viewer/
 │   │   ├── assets/    # собранные JS/CSS и скопированные статические спрайты
 │   │   ├── static/    # исходные изображения интерфейса, копируются при сборке
 │   │   └── world-map/ # HTML entry point
+│   ├── tmodloader/
+│   │   └── TerrariaWorldViewerTelemetry/ # связанный серверный мод-поставщик телеметрии
 │   ├── sprite_renderer/
 │   ├── config.py      # YAML schema/defaults/feature flags
 │   └── runtime.py     # локальный lifecycle сервиса и игрового процесса
-├── tmodloader/        # отдельный серверный мод, поставщик телеметрии
 └── docs/
 ```
 

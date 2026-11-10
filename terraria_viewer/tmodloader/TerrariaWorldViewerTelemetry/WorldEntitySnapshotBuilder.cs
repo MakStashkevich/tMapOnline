@@ -118,6 +118,38 @@ internal sealed class WorldEntitySnapshotBuilder
             .ToArray();
     }
 
+    internal object[] CaptureBossCatalog()
+    {
+        var catalog = new System.Collections.Generic.List<object>();
+        var headSlots = NPCID.Sets.BossHeadTextures;
+
+        for (var type = 1; type < NPCLoader.NPCCount && type < headSlots.Length; type++)
+        {
+            var headSlot = headSlots[type];
+            if (headSlot < 0 || !ContentSamples.NpcsByNetId.TryGetValue(type, out var sample))
+                continue;
+
+            var modNpc = sample.ModNPC;
+            var modName = modNpc?.Mod.Name ?? "Terraria";
+            var internalName = modNpc?.Name ?? sample.TypeName;
+            var headTexture = modNpc?.Mod == null
+                ? null
+                : ExportNpcTexture(modNpc.Mod, modNpc.BossHeadTexture);
+
+            catalog.Add(new
+            {
+                id = $"{modName}:{internalName}",
+                type,
+                name = MapTileNameCatalog.GetLocalizedNpcName(sample),
+                mod = modName,
+                bossHeadSlot = headSlot,
+                headTexture
+            });
+        }
+
+        return catalog.ToArray();
+    }
+
     private static Vector2 GetMapPosition(NPC npc, int bossHeadSlot)
     {
         if (bossHeadSlot == -1)

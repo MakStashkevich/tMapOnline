@@ -38,6 +38,7 @@ public sealed class TerrariaWorldViewerTelemetrySystem : ModSystem
     private readonly System.Collections.Generic.List<PendingPlayerDeath> _pendingPlayerDeaths = new();
     private readonly System.Collections.Generic.Dictionary<int, System.Collections.Generic.Dictionary<string, object?>> _cachedPlayers = new();
     private object[] _cachedNpcs = Array.Empty<object>();
+    private object[]? _cachedBossCatalog;
     private object[] _cachedCoins = Array.Empty<object>();
     private object[] _cachedPylons = Array.Empty<object>();
     private string[] _cachedActiveBosses = Array.Empty<string>();
@@ -405,6 +406,7 @@ public sealed class TerrariaWorldViewerTelemetrySystem : ModSystem
     private void UpdateCachedEntities()
     {
         _cachedNpcs = _worldEntities!.CaptureActiveNpcs();
+        _cachedBossCatalog ??= _worldEntities.CaptureBossCatalog();
         _cachedCoins = _worldEntities.CaptureDroppedCoins();
         BossVictoryTracker.BossVictoryStore.EnsureWorldLoaded();
         var calamity = CalamityBossProgressAdapter.Read();
@@ -511,6 +513,7 @@ public sealed class TerrariaWorldViewerTelemetrySystem : ModSystem
                 activeBosses = _cachedActiveBosses,
                 bossDiagnostics = _cachedBossDiagnostics,
                 activeNpcs = _cachedNpcs,
+                bossCatalog = _cachedBossCatalog,
                 droppedCoins = _cachedCoins,
                 defeatedBosses = _cachedDefeatedBosses,
                 bossDefeatCounts = _cachedBossDefeatCounts,

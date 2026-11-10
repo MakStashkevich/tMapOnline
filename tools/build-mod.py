@@ -12,7 +12,8 @@ from pathlib import Path
 
 
 def main() -> int:
-    project = Path(__file__).resolve().parents[1] / "tmodloader" / "TerrariaWorldViewerTelemetry"
+    repository_root = Path(__file__).resolve().parents[1]
+    project = repository_root / "terraria_viewer" / "tmodloader" / "TerrariaWorldViewerTelemetry"
     default_tml = Path.home() / "Library/Application Support/Steam/steamapps/common/tModLoader"
     tml_root = Path(os.environ.get("TML_ROOT", str(default_tml))).expanduser().resolve()
     if not (tml_root / "tModLoader.dll").is_file() or not (tml_root / "tMLMod.targets").is_file():
@@ -22,7 +23,12 @@ def main() -> int:
     env.setdefault("DOTNET_ROLL_FORWARD", "Major")
     with tempfile.TemporaryDirectory(prefix="terraria-viewer-mod-profile-") as isolated_home:
         env["HOME"] = isolated_home
-        command = ["dotnet", "build", str(project / "TerrariaWorldViewerTelemetry.csproj"), f"-p:TmlRoot={tml_root}"]
+        command = [
+            "dotnet",
+            "build",
+            str(project / "TerrariaWorldViewerTelemetry.csproj"),
+            f"-p:TmlRoot={tml_root}",
+        ]
         result = subprocess.run(command, cwd=project, env=env)
         if result.returncode:
             return result.returncode
@@ -30,7 +36,7 @@ def main() -> int:
         if len(packages) != 1:
             print(f"Expected one packaged mod in isolated profile, found {len(packages)}.", file=sys.stderr)
             return 1
-        destination = project.parents[1] / "dist" / packages[0].name
+        destination = repository_root / "dist" / packages[0].name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(packages[0], destination)
         print(f"Built isolated mod package: {destination}")
