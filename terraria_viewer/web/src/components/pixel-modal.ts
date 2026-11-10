@@ -3,6 +3,7 @@ export class PixelModal {
   private readonly title: HTMLElement;
   private readonly content: HTMLElement;
   private readonly focusTarget: HTMLElement;
+  private readonly tooltip = document.querySelector<HTMLElement>('#map-menu-tooltip');
   private returnFocus: HTMLElement | null = null;
 
   constructor() {
@@ -15,6 +16,7 @@ export class PixelModal {
       if (event.target === this.dialog) this.close();
     });
     this.dialog.addEventListener('close', () => {
+      if (this.tooltip?.parentElement === this.dialog) document.body.append(this.tooltip);
       document.body.classList.remove('modal-open');
       this.returnFocus?.focus();
     });
@@ -27,6 +29,7 @@ export class PixelModal {
     this.returnFocus = trigger;
     this.title.textContent = title;
     this.content.replaceChildren(content);
+    if (this.tooltip) this.dialog.append(this.tooltip);
     this.dialog.showModal();
     document.body.classList.add('modal-open');
     this.focusTarget.focus();
