@@ -6,182 +6,126 @@
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="dark" />
     <title>Terraria — Карта мира</title>
     <link rel="stylesheet" href="/assets/world-map.css" />
     <link rel="stylesheet" href="/assets/app-shell.css" />
   </head>
   <body>
-    <header class="topbar">
-      <button
-        class="menu-toggle tool"
-        id="sidebar-toggle"
-        type="button"
-        aria-label="Открыть разделы"
-        aria-controls="map-sidebar"
-        aria-expanded="false"
+    <main id="map-pane" class="map-pane" aria-label="Карта мира">
+      <div
+        id="viewport"
+        class="map-viewport"
+        aria-label="Карта мира. Жесты меняют масштаб и положение карты."
       >
-        <i data-lucide="menu" class="ui-icon" aria-hidden="true"></i>
-      </button>
-      <div class="heading">
-        <h1 id="title">Карта мира</h1>
-        <div id="subtitle">Загружаю данные мира…</div>
+        <div class="map-stage" id="stage">
+          <div id="chunk-layer"></div>
+          <svg id="paths" preserveAspectRatio="none"><g id="route-layer"></g></svg>
+          <div class="map-ping-layer" id="pings" aria-live="off"></div>
+          <div class="pylon-layer" id="pylons"></div>
+          <div class="spawn-layer" id="spawn"></div>
+          <div class="entity-layer" id="entities"></div>
+          <div class="coin-layer" id="coins"></div>
+          <div class="death-layer" id="deaths"></div>
+          <div class="markers" id="markers"></div>
+          <div id="map-edge-bands" aria-hidden="true"></div>
+        </div>
+        <div class="status" id="status" hidden></div>
       </div>
-      <div class="tools">
+      <div class="map-menu-tooltip" id="map-menu-tooltip" role="tooltip" hidden></div>
+      <div id="map-tooltip" role="tooltip" hidden><strong></strong><span></span></div>
+
+      <div class="map-action-menu" id="map-action-menu">
+        <div class="map-submenu pixel-button-column" id="map-submenu" hidden></div>
+        <div class="map-menu-column">
+          <div
+            class="map-category-list pixel-button-column"
+            id="map-category-list"
+            role="toolbar"
+            aria-label="Инструменты карты"
+          ></div>
+          <div class="map-menu-settings">
+            <button
+              class="pixel-button menu-main-button"
+              id="map-menu-toggle"
+              type="button"
+              aria-label="Настройки карты"
+              aria-expanded="false"
+            >
+              <img
+                class="pixel-art-icon"
+                src="/assets/map-icons/rabbit.png"
+                alt=""
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pixel-zoom-controls" id="zoom-tools" aria-label="Масштаб карты">
         <button
-          class="tool theme-toggle"
-          id="theme-toggle"
+          class="pixel-button pixel-icon-button"
+          id="zoom-in"
           type="button"
-          aria-label="Переключить тему"
-          title="Сменить тему"
+          aria-label="Увеличить карту"
         >
-          <i data-lucide="sun" class="ui-icon" aria-hidden="true"></i>
+          <img src="/assets/ui/larchrow/icons/icon_plus.png" alt="" aria-hidden="true" />
+        </button>
+        <div id="zoom-level">100%</div>
+        <button
+          class="pixel-button pixel-icon-button"
+          id="zoom-out"
+          type="button"
+          aria-label="Уменьшить карту"
+        >
+          <img src="/assets/ui/larchrow/icons/icon_minus.png" alt="" aria-hidden="true" />
+        </button>
+      </div>
+      <div class="map-utility-group">
+        <button
+          class="pixel-button pixel-text-button"
+          id="fit"
+          type="button"
+          title="Показать весь мир"
+        >
+          <img src="/assets/ui/larchrow/icons/icon_map.png" alt="" aria-hidden="true" />
+          <span>Мир</span>
         </button>
         <button
-          class="tool download-tool"
+          class="pixel-button"
           id="download-map"
           type="button"
-          title="Скачать изображение карты без линий и меток"
-          aria-label="Скачать карту PNG"
+          aria-label="Скачать PNG карты"
+          title="Скачать PNG карты"
         >
-          <i data-lucide="download" class="ui-icon" aria-hidden="true"></i>
+          <img src="/assets/ui/larchrow/icons/icon_save.png" alt="" aria-hidden="true" />
           <span>PNG</span>
         </button>
-        <button class="tool" id="fit" type="button" title="Показать весь мир">Весь мир</button>
       </div>
-    </header>
-
-    <main class="workspace">
-      <section id="map-pane" class="map-pane" aria-label="Карта мира">
-        <nav
-          class="players map-layers"
-          id="players"
-          aria-label="Отображение областей и маршрутов игроков"
-        >
-          <span class="players-label">Загружаю игроков…</span>
-        </nav>
-        <div
-          class="map-viewport"
-          id="viewport"
-          aria-label="Карта мира. Колесо мыши или жест двумя пальцами меняют масштаб; перетаскивание двигает карту."
-        >
-          <div class="map-stage" id="stage">
-            <div id="chunk-layer"></div>
-            <svg id="paths" preserveAspectRatio="none"><g id="route-layer"></g></svg>
-            <div class="map-ping-layer" id="pings" aria-live="off"></div>
-            <div class="pylon-layer" id="pylons"></div>
-            <div class="spawn-layer" id="spawn"></div>
-            <div class="entity-layer" id="entities"></div>
-            <div class="coin-layer" id="coins"></div>
-            <div class="death-layer" id="deaths"></div>
-            <div class="markers" id="markers"></div>
-            <div id="map-edge-bands" aria-hidden="true"></div>
-          </div>
-          <div class="status" id="status" hidden></div>
-        </div>
-        <div id="map-tooltip" role="tooltip" hidden>
-          <strong></strong>
-          <span></span>
-        </div>
-        <div class="zoom-tools" aria-label="Масштаб карты">
-          <button class="tool" id="zoom-in" type="button" aria-label="Увеличить карту">
-            <i data-lucide="plus" class="ui-icon" aria-hidden="true"></i>
-          </button>
-          <div id="zoom-level">100%</div>
-          <button class="tool" id="zoom-out" type="button" aria-label="Уменьшить карту">
-            <i data-lucide="minus" class="ui-icon" aria-hidden="true"></i>
-          </button>
-        </div>
-      </section>
-
-      <section id="section-pane" class="section-pane" aria-live="polite" hidden>
-        <header class="section-page-header">
-          <div>
-            <div class="drawer-eyebrow">TERRARIA — WORLD VIEWER</div>
-            <h2 id="section-title">Игроки</h2>
-            <p id="section-description"></p>
-          </div>
-          <button
-            class="tool section-menu-button"
-            id="section-menu-toggle"
-            type="button"
-            aria-label="Открыть разделы"
-          >
-            <i data-lucide="menu" class="ui-icon" aria-hidden="true"></i>
-          </button>
-        </header>
-        <div id="section-content" class="section-content">
-          <div class="section-loading">Выберите раздел</div>
-        </div>
-      </section>
     </main>
 
-    <div class="drawer-backdrop" id="sidebar-backdrop" hidden></div>
-    <aside
-      class="side-drawer"
-      id="map-sidebar"
-      aria-labelledby="sidebar-title"
-      aria-hidden="true"
-      inert
-    >
-      <header class="drawer-header">
-        <div>
-          <div class="drawer-eyebrow">TERRARIA — WORLD VIEWER</div>
-          <h2 id="sidebar-title">Разделы</h2>
-        </div>
-        <button
-          class="tool drawer-close"
-          id="sidebar-close"
-          type="button"
-          aria-label="Закрыть меню"
-        >
-          <i data-lucide="x" class="ui-icon" aria-hidden="true"></i>
-        </button>
-      </header>
-      <div class="drawer-content">
-        <nav class="section-nav" aria-label="Разделы Viewer">
-          <button class="section-nav-item active" data-view="map" type="button">
-            <i data-lucide="map" class="ui-icon section-icon" aria-hidden="true"></i>
-            Карта мира
-          </button>
-          <button class="section-nav-item" data-view="world" type="button">
-            <i data-lucide="database" class="ui-icon section-icon" aria-hidden="true"></i>
-            Данные карты
-          </button>
-          <button class="section-nav-item" data-view="players" type="button">
-            <i data-lucide="users" class="ui-icon section-icon" aria-hidden="true"></i>
-            Игроки
-          </button>
-          <button class="section-nav-item" data-view="bosses" type="button">
-            <i data-lucide="skull" class="ui-icon section-icon" aria-hidden="true"></i>
-            Боссы
-          </button>
-          <button class="section-nav-item" data-view="server" type="button">
-            <i data-lucide="server" class="ui-icon section-icon" aria-hidden="true"></i>
-            Сервер
-          </button>
-          <button class="section-nav-item" data-view="activity" type="button">
-            <i data-lucide="activity" class="ui-icon section-icon" aria-hidden="true"></i>
-            Нагрузка и события
-          </button>
-        </nav>
-        <section
-          class="drawer-section layer-section"
-          id="map-layer-section"
-          aria-labelledby="layers-heading"
-        >
-          <div class="section-heading"><h3 id="layers-heading">Слои карты</h3></div>
-          <nav
-            class="players drawer-player-layers"
-            id="drawer-players"
-            aria-label="Отображение областей и маршрутов игроков"
+    <dialog class="pixel-modal" id="pixel-modal" aria-labelledby="pixel-modal-title">
+      <div class="pixel-modal-frame">
+        <header class="pixel-modal-header">
+          <h2 id="pixel-modal-title"></h2>
+          <button
+            class="pixel-button pixel-icon-button pixel-modal-close"
+            type="button"
+            aria-label="Закрыть окно"
           >
-            <span class="players-label">Загружаю игроков…</span>
-          </nav>
-        </section>
+            <img src="/assets/ui/larchrow/icons/icon_close.png" alt="" aria-hidden="true" />
+          </button>
+        </header>
+        <div class="pixel-modal-content" id="pixel-modal-content" tabindex="0">
+          <section class="pixel-player-layer-panel" id="pixel-player-layer-panel" hidden>
+            <h3 class="pixel-section-heading">Исследование и маршруты</h3>
+            <nav class="players map-layers" id="players" aria-label="Слои игроков и маршруты"></nav>
+          </section>
+          <div class="pixel-section-content" id="pixel-section-content"></div>
+        </div>
       </div>
-      <footer class="drawer-footer"><span>Данные вкладок загружаются при открытии</span></footer>
-    </aside>
+    </dialog>
     <div id="app-tooltip" role="tooltip" hidden></div>
     <script type="module" src="/assets/app-shell.js"></script>
     <script type="module" src="/assets/world-map.js"></script>

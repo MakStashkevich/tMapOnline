@@ -25,11 +25,8 @@ export async function mount(root: HTMLElement): Promise<void> {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const data = await response.json(),
     server = data.server || {},
-    tunnel = data.tunnel || {},
     info = data.server_info || {},
-    metrics = data.host_metrics || {},
-    net = data.network || {},
-    connection = data.connection || {};
+    metrics = data.host_metrics || {};
   root.replaceChildren();
   const grid = document.createElement('div');
   grid.className = 'metric-grid';
@@ -38,10 +35,6 @@ export async function mount(root: HTMLElement): Promise<void> {
       'Terraria',
       server.running ? 'Работает' : 'Остановлена',
       server.listening ? 'Порт принимает подключения' : 'Порт пока недоступен',
-    ),
-    metric(
-      'SSH-туннель',
-      tunnel.connected ? 'Подключён' : tunnel.reconnecting ? 'Переподключается' : 'Отключён',
     ),
     metric(
       'Игроки онлайн',
@@ -77,12 +70,12 @@ export async function mount(root: HTMLElement): Promise<void> {
   const section = document.createElement('section');
   section.className = 'section-block';
   const heading = document.createElement('h3');
-  heading.textContent = 'Соединение и мир';
+  heading.textContent = 'Игровой сервер';
   section.append(heading);
   const dl = document.createElement('dl');
   dl.className = 'detail-list';
   for (const [key, value] of [
-    ['Адрес сервера', connection.game_address],
+    ['Порт игры', info.port],
     ['Мир', info.world],
     [
       'Размер карты',
@@ -91,8 +84,6 @@ export async function mount(root: HTMLElement): Promise<void> {
         : null,
     ],
     ['Версия Terraria', info.version],
-    ['Сетевой интерфейс', net.interface],
-    ['Шлюз', net.gateway],
   ]) {
     const row = document.createElement('div'),
       dt = document.createElement('dt'),

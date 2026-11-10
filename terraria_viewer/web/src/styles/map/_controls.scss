@@ -289,9 +289,10 @@
   font-weight: 100 800;
   font-display: swap;
 }
-#map-tooltip {
+#map-tooltip,
+#map-menu-tooltip {
   position: fixed;
-  z-index: 20;
+  z-index: 1000;
   max-width: min(460px, calc(100vw - 36px));
   padding: 0;
   color: #fff;
@@ -318,16 +319,20 @@
     0 -2px 0 #000,
     0 2px 0 #000;
 }
-#map-tooltip[hidden] {
+#map-tooltip[hidden],
+#map-menu-tooltip[hidden] {
   display: none;
 }
 #map-tooltip strong,
-#map-tooltip span {
+#map-tooltip span,
+#map-menu-tooltip strong,
+#map-menu-tooltip span {
   display: block;
   color: inherit;
   font-size: inherit;
   font-weight: inherit;
 }
-#map-tooltip span {
+#map-tooltip span,
+#map-menu-tooltip span {
   margin-top: 2px;
 }

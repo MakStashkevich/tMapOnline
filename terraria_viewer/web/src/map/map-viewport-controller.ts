@@ -2,6 +2,7 @@ type WorldPoint = { x: number; y: number };
 type PointerPosition = { x: number; y: number };
 type DragStart = PointerPosition & { left: number; top: number };
 type PinchStart = WorldPoint & { distance: number; scale: number };
+import { MapZoomControls } from './map-zoom-controls';
 
 export type MapViewportBindings = {
   getScale(): number;
@@ -25,6 +26,7 @@ export class MapViewportController {
   private dragStart: DragStart | null = null;
   private resizeFrame: number | null = null;
   private lastTap: { at: number; x: number; y: number } | null = null;
+  private readonly zoomControls = new MapZoomControls();
 
   constructor(
     private readonly viewport: HTMLElement,
@@ -32,13 +34,11 @@ export class MapViewportController {
   ) {}
 
   bind(): void {
-    document.getElementById('zoom-in')?.addEventListener('click', () => {
-      this.zoomBy(1.4);
-    });
-    document.getElementById('zoom-out')?.addEventListener('click', () => {
-      this.zoomBy(1 / 1.4);
-    });
-    document.getElementById('fit')?.addEventListener('click', this.bindings.fitMap);
+    this.zoomControls.bind(
+      () => this.zoomBy(1.4),
+      () => this.zoomBy(1 / 1.4),
+      this.bindings.fitMap,
+    );
     document
       .getElementById('download-map')
       ?.addEventListener('click', this.bindings.downloadMapImage);
@@ -54,6 +54,10 @@ export class MapViewportController {
     });
     window.addEventListener('resize', this.onResize);
     window.visualViewport?.addEventListener('resize', this.onResize);
+  }
+
+  setZoomLabel(value: string): void {
+    this.zoomControls.setLevel(value);
   }
 
   private zoomBy(multiplier: number): void {

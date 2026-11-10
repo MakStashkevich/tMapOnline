@@ -1,0 +1,904 @@
+html,
+body {
+  background: #050505;
+  color: #fff;
+  font-family: 'Pixellari', 'Courier New', monospace;
+  font-size: 14px;
+  image-rendering: pixelated;
+}
+
+body {
+  display: block;
+  min-height: 100dvh;
+}
+.map-pane {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+}
+.map-viewport {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.pixel-button {
+  display: grid;
+  min-width: 38px;
+  min-height: 38px;
+  place-items: center;
+  padding: 4px;
+  border: 4px solid transparent;
+  border-width: 4px 16px;
+  border-image: url('/assets/ui/larchrow/components/button_blue_normal_48x16.png') 4 16 fill / 4px
+    16px stretch;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 1px 1px #101126;
+  cursor: pointer;
+  image-rendering: pixelated;
+}
+.pixel-button:hover,
+.pixel-button.active,
+.pixel-button[aria-pressed='true'] {
+  border-image-source: url('/assets/ui/larchrow/components/button_blue_hover_48x16.png');
+}
+.pixel-button:active {
+  border-image-source: url('/assets/ui/larchrow/components/button_blue_pressed_48x16.png');
+}
+
+.map-action-menu {
+  position: fixed;
+  z-index: 20;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: 60px;
+}
+.map-menu-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 60px;
+}
+.pixel-button-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  width: 60px;
+  padding: 6px 4px;
+  border: 6px solid transparent;
+  border-image: url('/assets/ui/larchrow/components/panel_dark_48x48.png') 6 fill / 6px stretch;
+  background: transparent;
+}
+.map-category-list {
+  position: static;
+  display: none;
+}
+.map-action-menu.expanded .map-category-list {
+  display: flex;
+}
+.pixel-button-column > .pixel-button {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+}
+.map-category-button {
+  position: relative;
+}
+.pixel-button.map-category-button:hover,
+.pixel-button.map-category-button:focus-visible,
+.pixel-button.map-category-button.active,
+.pixel-button.map-category-button[aria-pressed='true'],
+.pixel-button.map-submenu-button.active,
+.pixel-button.map-submenu-button[aria-pressed='true'] {
+  outline: 0;
+}
+.pixel-button.map-category-button.active,
+.pixel-button.map-category-button[aria-pressed='true'],
+.pixel-button.map-submenu-button.active,
+.pixel-button.map-submenu-button[aria-pressed='true'] {
+  border-image: none;
+}
+.pixel-button-column .pixel-art-icon,
+.menu-main-button .pixel-art-icon {
+  display: block;
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  transition:
+    filter 140ms ease,
+    transform 140ms ease;
+}
+.map-category-button,
+.map-submenu-button {
+  position: relative;
+}
+.map-category-button:hover .pixel-art-icon,
+.map-category-button:focus-visible .pixel-art-icon,
+.map-category-button.active .pixel-art-icon,
+.map-category-button[aria-pressed='true'] .pixel-art-icon,
+.map-submenu-button:hover .pixel-art-icon,
+.map-submenu-button:focus-visible .pixel-art-icon {
+  filter: brightness(1.12);
+}
+.pixel-art-icon {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.menu-main-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 48px;
+  height: 48px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.map-menu-settings {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 60px;
+  height: 58px;
+  padding: 0 4px 10px;
+}
+.pixel-button.menu-main-button:hover,
+.pixel-button.menu-main-button:focus-visible,
+.pixel-button.menu-main-button.active,
+.pixel-button.menu-main-button[aria-pressed='true'] {
+  border-color: transparent;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.menu-main-button.active,
+.menu-main-button[aria-pressed='true'] {
+  transform: none;
+}
+.menu-main-button .pixel-art-icon {
+  width: 40px;
+  height: 38px;
+  filter: none;
+  transition:
+    filter 140ms ease,
+    transform 140ms ease;
+}
+.menu-main-button:hover .pixel-art-icon,
+.menu-main-button:focus-visible .pixel-art-icon {
+  filter: brightness(1.16);
+  transform: translateY(-1px) scale(1.06);
+}
+.menu-main-button.active .pixel-art-icon,
+.menu-main-button[aria-pressed='true'] .pixel-art-icon {
+  animation: map-button-selected 1.2s ease-in-out infinite alternate;
+}
+.map-submenu {
+  position: absolute;
+  bottom: auto;
+  left: 70px;
+}
+.map-submenu[hidden] {
+  display: none;
+}
+.map-submenu-button {
+  position: relative;
+}
+.map-submenu-button:active,
+.map-submenu-button.active,
+.map-submenu-button[aria-pressed='true'] {
+  transform: none;
+}
+.map-submenu-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+}
+@keyframes map-button-selected {
+  from {
+    filter: brightness(0.96) drop-shadow(0 0 0 #ffd447);
+  }
+  to {
+    filter: brightness(1.2) drop-shadow(0 0 4px #ffd447);
+  }
+}
+.pixel-zoom-controls {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 10;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(22px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 60px;
+  padding: 6px;
+  background: #131d47;
+  border: 3px solid #11152f;
+  outline: 2px solid #6478be;
+  box-shadow: 3px 3px 0 #000;
+  text-align: center;
+}
+#zoom-level {
+  min-width: 48px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 1px 1px #101126;
+}
+.map-utility-group {
+  position: fixed;
+  z-index: 10;
+  top: max(14px, env(safe-area-inset-top));
+  right: max(18px, env(safe-area-inset-right));
+  display: flex;
+  gap: 8px;
+}
+
+.pixel-modal {
+  width: min(650px, calc(100vw - 36px));
+  max-width: 650px;
+  max-height: min(78dvh, 760px);
+  padding: 8px;
+  overflow: visible;
+  color: #fff;
+  background: #17244f;
+  border: 6px solid transparent;
+  border-image: url('/assets/ui/larchrow/components/panel_dark_48x48.png') 6 fill / 6px stretch;
+  box-shadow: 5px 5px 0 #000;
+  image-rendering: pixelated;
+}
+.pixel-modal::backdrop {
+  background: #000b;
+}
+.pixel-modal-frame {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(min(78dvh, 760px) - 16px);
+}
+.pixel-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px 10px;
+  border-bottom: 2px solid #5065a8;
+}
+.pixel-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.pixel-modal-close {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  font-size: 22px;
+}
+#map-settings {
+  padding: 8px;
+  color: #fff;
+  background: transparent;
+  border: 6px solid transparent;
+  border-image: url('/assets/ui/larchrow/components/panel_dark_48x48.png') 6 fill / 6px stretch;
+  border-radius: 0;
+  box-shadow: 5px 5px 0 #000;
+}
+#map-settings::backdrop {
+  background: #000b;
+}
+.settings-head,
+.settings-body {
+  background: #17244f;
+}
+.settings-head {
+  border-bottom: 2px solid #5065a8;
+}
+.scan-panel,
+.setting-option {
+  border-radius: 0;
+  background: #202f65;
+  border-color: #465c9d;
+}
+.map-utility-group .pixel-button {
+  min-width: 44px;
+}
+.pixel-modal-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  min-height: 60px;
+  padding: 12px 8px 8px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.pixel-section-content {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+}
+.pixel-modal-content:focus {
+  outline: none;
+}
+.pixel-section-heading {
+  margin: 0 0 9px;
+  color: #cfdbff;
+  font-size: 14px;
+}
+.pixel-modal .viewer-card,
+.pixel-modal .scan-panel,
+.pixel-modal .setting-option,
+.pixel-modal .section-summary,
+.pixel-modal .activity-card,
+.pixel-modal .server-card,
+.pixel-modal .world-card,
+.pixel-modal .boss-row {
+  border-radius: 0;
+  background: #202f65;
+  border: 2px solid #465c9d;
+  box-shadow: inset 0 0 0 1px #121d45;
+}
+.pixel-modal .map-layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 12px;
+  border: 0;
+}
+.pixel-modal .map-layers {
+  align-items: flex-start;
+  min-height: 0;
+  overflow: visible;
+}
+.pixel-modal .players-label {
+  flex-basis: 100%;
+  color: #bdcaff;
+}
+.pixel-modal .player-control {
+  min-height: 40px;
+  padding: 3px;
+  border: 2px solid #5268a8;
+  background: #202f65;
+}
+.map-display-settings {
+  display: grid;
+  gap: 8px;
+}
+.map-setting-toggle,
+.map-setting-range {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  color: #f5f7ff;
+  background: #202f65;
+  border: 2px solid #465c9d;
+  box-shadow: inset 0 0 0 1px #121d45;
+}
+.map-setting-toggle {
+  grid-template-columns: 1fr 42px;
+  align-items: center;
+}
+.map-setting-toggle input {
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  border: 0;
+  background: url('/assets/ui/larchrow/components/toggle_mini_off.png') center / 32px 32px no-repeat;
+  cursor: pointer;
+}
+.map-setting-toggle input::before {
+  content: none;
+}
+.map-setting-toggle input:checked::before {
+  content: none;
+}
+.map-setting-toggle input:checked {
+  background-image: url('/assets/ui/larchrow/components/toggle_mini_on.png');
+}
+.map-setting-range-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #d4defe;
+}
+.map-setting-range output {
+  color: #fff;
+  white-space: nowrap;
+}
+.map-setting-range input[type='range'] {
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+.map-setting-range input[type='range']::-webkit-slider-runnable-track {
+  height: 16px;
+  border: 0;
+  background: url('/assets/ui/larchrow/components/slider_track_48x16.png') center / auto 16px
+    repeat-x;
+}
+.map-setting-range input[type='range']::-moz-range-track {
+  height: 16px;
+  border: 0;
+  background: url('/assets/ui/larchrow/components/slider_track_48x16.png') center / auto 16px
+    repeat-x;
+}
+.map-setting-range input[type='range']::-moz-range-progress {
+  height: 6px;
+  background: #91aaff;
+}
+.map-setting-range input[type='range']::-webkit-slider-thumb {
+  width: 32px;
+  height: 32px;
+  margin-top: -8px;
+  appearance: none;
+  border: 0;
+  background: url('/assets/ui/larchrow/components/slider_knob_normal.png') center / 32px 32px
+    no-repeat;
+}
+.map-setting-range input[type='range']::-moz-range-thumb {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: url('/assets/ui/larchrow/components/slider_knob_normal.png') center / 32px 32px
+    no-repeat;
+}
+.map-setting-range input[type='range']:focus-visible {
+  outline: 2px solid #ffe56a;
+  outline-offset: 3px;
+}
+.pixel-modal .player-toggle {
+  min-height: 36px;
+  color: #fff;
+}
+.pixel-modal .route-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+.pixel-modal .route-load,
+.pixel-modal .route-period {
+  min-height: 36px;
+  padding: 5px 8px;
+  color: #fff;
+  background: #26366f;
+  border: 2px solid #5268a8;
+}
+.pixel-modal .player-toggle,
+.pixel-modal .route-toggle,
+.pixel-modal .route-load,
+.pixel-modal .route-period,
+.pixel-modal button,
+.pixel-modal select {
+  border-radius: 0;
+}
+.pixel-modal .player-control {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.section-content {
+  display: grid;
+  gap: 12px;
+}
+.player-cards,
+.metric-grid,
+.detail-list,
+.event-list,
+.boss-list,
+.boss-victory-list {
+  display: grid;
+  gap: 8px;
+}
+.viewer-card,
+.metric-card,
+.section-block,
+.chart-card,
+.event-row,
+.boss-row,
+.section-summary,
+.world-progress,
+.boss-progress {
+  padding: 10px;
+  color: #eef2ff;
+  background: #202f65;
+  border: 2px solid #465c9d;
+}
+.viewer-card-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.viewer-card h3,
+.section-block h3,
+.chart-card h3 {
+  margin: 0;
+}
+.player-card-avatar {
+  display: grid;
+  width: 42px;
+  height: 48px;
+  place-items: center;
+}
+.player-card-avatar-sprite {
+  image-rendering: pixelated;
+}
+.detail-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid #44588f;
+}
+.detail-list dt {
+  color: #bdcaff;
+}
+.detail-list dd {
+  margin: 0;
+  text-align: right;
+}
+.boss-victory-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+.boss-victory-list li {
+  padding: 7px;
+  background: #26366f;
+  border: 1px solid #566aa7;
+}
+.boss-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}
+.boss-sprite-frame {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+}
+.boss-sprite {
+  max-width: 34px;
+  max-height: 34px;
+  image-rendering: pixelated;
+}
+.viewer-card p,
+.section-summary,
+.event-meta,
+.metric-card span,
+.metric-card small {
+  color: #bdcaff;
+}
+.viewer-badge.online {
+  padding: 3px 6px;
+  background: #25835a;
+  border: 1px solid #66dba2;
+}
+.session-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+}
+.session-row {
+  font-size: 12px;
+  color: #c3cff7;
+}
+.metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+.metric-card strong {
+  display: block;
+  font-size: 19px;
+}
+.event-row.warning {
+  border-color: #b78b45;
+}
+.event-row.error {
+  border-color: #a34c59;
+}
+.section-error,
+.section-empty {
+  padding: 10px;
+  color: #d5defc;
+}
+
+/* Use only the pack pieces needed by the web UI; map entity sprites stay game-authentic. */
+.pixel-icon-button {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  background: url('/assets/ui/larchrow/components/button_square_blue_normal.png') center / 48px 48px
+    no-repeat;
+}
+.pixel-icon-button:hover,
+.pixel-icon-button:focus-visible {
+  background-image: url('/assets/ui/larchrow/components/button_square_blue_hover.png');
+}
+.pixel-icon-button:active {
+  background-image: url('/assets/ui/larchrow/components/button_square_blue_pressed.png');
+}
+.pixel-icon-button img {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.pixel-text-button {
+  display: inline-flex;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-height: 42px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.pixel-text-button img,
+.pixel-button-icon img {
+  display: block;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.pixel-button-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+.pixel-button-label {
+  display: block;
+  flex: 0 0 auto;
+}
+.map-category-button,
+.map-submenu-button {
+  border: 0;
+  border-image: none;
+  background: url('/assets/ui/larchrow/components/button_square_blue_normal.png') center / 48px 48px
+    no-repeat;
+}
+.map-category-button:hover,
+.map-submenu-button:hover,
+.map-category-button:focus-visible,
+.map-submenu-button:focus-visible {
+  background-image: url('/assets/ui/larchrow/components/button_square_blue_hover.png');
+}
+.map-category-button.active,
+.map-category-button[aria-pressed='true'],
+.map-submenu-button.active,
+.map-submenu-button[aria-pressed='true'] {
+  background-image: url('/assets/ui/larchrow/components/button_square_gold_normal.png');
+}
+.pixel-button.map-category-button,
+.pixel-button.map-submenu-button,
+.pixel-button.pixel-icon-button,
+.pixel-button.map-category-button.active,
+.pixel-button.map-category-button[aria-pressed='true'],
+.pixel-button.map-submenu-button.active,
+.pixel-button.map-submenu-button[aria-pressed='true'],
+.pixel-button.menu-main-button {
+  border: 0;
+  border-image: none;
+}
+.pixel-button.menu-main-button:hover,
+.pixel-button.menu-main-button:focus-visible,
+.pixel-button.menu-main-button.active,
+.pixel-button.menu-main-button[aria-pressed='true'] {
+  background: transparent;
+}
+.map-submenu-button:active,
+.map-category-button:active {
+  background-image: url('/assets/ui/larchrow/components/button_square_blue_pressed.png');
+}
+.map-submenu-button .pixel-art-icon {
+  flex: 0 0 auto;
+  margin: 0;
+  transform: none;
+  transition: filter 140ms ease;
+}
+.map-category-button .pixel-art-icon {
+  width: 32px;
+  height: 32px;
+}
+.menu-main-button {
+  border: 0;
+  border-image: none;
+  background: transparent;
+}
+.pixel-zoom-controls {
+  border: 6px solid transparent;
+  border-image: url('/assets/ui/larchrow/components/panel_dark_48x48.png') 6 fill / 6px stretch;
+  background: transparent;
+  box-shadow: 3px 3px 0 #000;
+}
+.pixel-zoom-controls .pixel-icon-button {
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  font-size: 0;
+}
+.pixel-zoom-controls .pixel-icon-button img {
+  width: 32px;
+  height: 32px;
+  filter: brightness(0) invert(1);
+}
+.pixel-modal .pixel-modal-close {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+}
+.pixel-modal .player-toggle,
+.pixel-modal .route-toggle,
+.pixel-modal .route-load,
+.pixel-modal .route-period,
+.pixel-modal button:not(.pixel-modal-close),
+.map-utility-group .pixel-button {
+  border-radius: 0;
+  border-image: url('/assets/ui/larchrow/components/button_blue_normal_48x16.png') 4 16 fill / 4px
+    16px stretch;
+  background: transparent;
+  box-shadow: none;
+}
+.pixel-modal button:not(.pixel-modal-close):hover,
+.pixel-modal button:not(.pixel-modal-close):focus-visible,
+.map-utility-group .pixel-button:hover,
+.map-utility-group .pixel-button:focus-visible {
+  border-image-source: url('/assets/ui/larchrow/components/button_blue_hover_48x16.png');
+}
+.pixel-modal button:not(.pixel-modal-close):active,
+.map-utility-group .pixel-button:active {
+  border-image-source: url('/assets/ui/larchrow/components/button_blue_pressed_48x16.png');
+}
+.pixel-modal button:disabled,
+.map-utility-group .pixel-button:disabled {
+  border-image-source: url('/assets/ui/larchrow/components/button_disabled_48x16.png');
+  cursor: not-allowed;
+}
+.pixel-modal button.clear-imported-map {
+  border-image-source: url('/assets/ui/larchrow/components/button_red_normal_48x16.png');
+}
+.pixel-modal button.clear-imported-map:hover,
+.pixel-modal button.clear-imported-map:focus-visible {
+  border-image-source: url('/assets/ui/larchrow/components/button_red_hover_48x16.png');
+}
+.pixel-modal button.clear-imported-map:active {
+  border-image-source: url('/assets/ui/larchrow/components/button_red_pressed_48x16.png');
+}
+#map-settings .settings-head {
+  background: transparent;
+}
+#map-settings .settings-body {
+  padding: 12px 8px 8px;
+  background: transparent;
+}
+#map-settings input[type='checkbox'] {
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  border: 0;
+  background: url('/assets/ui/larchrow/components/toggle_mini_off.png') center / 32px 32px no-repeat;
+  cursor: pointer;
+}
+#map-settings input[type='checkbox']:checked {
+  background-image: url('/assets/ui/larchrow/components/toggle_mini_on.png');
+}
+#map-settings .scan-track {
+  border: 0 solid transparent;
+  border-width: 0 16px;
+  border-image: url('/assets/ui/larchrow/components/slider_track_48x16.png') 0 16 fill / 0 16px
+    stretch;
+}
+#map-settings #scan-progress-bar {
+  background: #72bd64;
+}
+.pixel-modal-close {
+  border: 0;
+  background: url('/assets/ui/larchrow/components/button_square_blue_normal.png') center / 40px 40px
+    no-repeat;
+}
+.pixel-modal-close:hover,
+.pixel-modal-close:focus-visible {
+  background-image: url('/assets/ui/larchrow/components/button_square_blue_hover.png');
+}
+.pixel-modal-close img {
+  width: 24px;
+  height: 24px;
+}
+.pixel-modal .viewer-card,
+.pixel-modal .scan-panel,
+.pixel-modal .setting-option,
+.pixel-modal .section-summary,
+.pixel-modal .activity-card,
+.pixel-modal .server-card,
+.pixel-modal .world-card,
+.pixel-modal .boss-row {
+  border: 6px solid transparent;
+  border-image: url('/assets/ui/larchrow/components/panel_dark_48x48.png') 6 fill / 6px stretch;
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (max-width: 600px) {
+  .map-action-menu {
+    left: max(14px, env(safe-area-inset-left));
+    bottom: max(18px, env(safe-area-inset-bottom));
+    width: 48px;
+  }
+  .map-category-button {
+    width: 48px;
+    height: 48px;
+  }
+  .menu-main-button {
+    width: 48px;
+    height: 48px;
+  }
+  .map-submenu {
+    left: 66px;
+  }
+  .pixel-zoom-controls {
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(18px, env(safe-area-inset-bottom));
+  }
+  .map-utility-group {
+    top: max(12px, env(safe-area-inset-top));
+    right: max(14px, env(safe-area-inset-right));
+  }
+  .pixel-modal {
+    width: calc(100vw - 28px);
+    max-height: min(76dvh, 700px);
+  }
+  .pixel-modal-frame {
+    max-height: calc(min(76dvh, 700px) - 16px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-main-button.active .pixel-art-icon,
+  .menu-main-button[aria-pressed='true'] .pixel-art-icon {
+    animation: none;
+  }
+}

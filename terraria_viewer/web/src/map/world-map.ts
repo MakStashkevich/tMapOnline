@@ -1,5 +1,4 @@
 import { activateModules } from '../core/modules';
-import { renderIcons } from '../core/icons';
 import { MapViewportController } from './map-viewport-controller';
 import { MapEntityLayer } from './map-entity-layer';
 import { MapTooltipController } from './map-tooltip-controller';
@@ -10,8 +9,13 @@ import { MapPyramidLayerRenderer } from './map-pyramid-layer-renderer';
 import { MapImageExporter } from './map-image-exporter';
 import { MapRenderDebugPanel } from './map-render-debug-panel';
 import { MapPingLayer } from './map-ping-layer';
+import {
+  readMapDisplaySettings,
+  type MapDisplaySettings,
+} from '../components/map-display-settings';
 
 const modules = await activateModules('world_map');
+const mapDisplaySettings = readMapDisplaySettings();
 
 (() => {
   const $ = (id: string): any => document.getElementById(id);
@@ -20,26 +24,25 @@ const modules = await activateModules('world_map');
   const debugMode = /^\/debug\/?$/.test(location.pathname);
   if (debugMode) {
     document
-      .querySelector('.zoom-tools')
+      .querySelector('#zoom-tools')
       .insertAdjacentHTML(
         'afterbegin',
-        '<button class="tool" id="map-settings-button" type="button" aria-label="Настройки карты" title="Настройки карты"><i data-lucide="settings" class="ui-icon" aria-hidden="true"></i></button>',
+        '<button class="pixel-button pixel-icon-button" id="map-settings-button" type="button" aria-label="Настройки карты" title="Настройки карты"><img src="/assets/ui/larchrow/icons/icon_gear.png" alt="" aria-hidden="true"></button>',
       );
     document.body.insertAdjacentHTML(
       'beforeend',
-      `<dialog id="map-settings" aria-labelledby="settings-title">
-      <div class="settings-head"><h2 id="settings-title">Настройки карты</h2><button class="tool" id="close-settings" type="button" aria-label="Закрыть настройки"><i data-lucide="x" class="ui-icon" aria-hidden="true"></i></button></div>
-      <div class="settings-body">
+      `<dialog class="pixel-modal" id="map-settings" aria-labelledby="settings-title">
+      <div class="pixel-modal-frame">
+      <header class="pixel-modal-header settings-head"><h2 id="settings-title">Настройки карты</h2><button class="pixel-button pixel-icon-button pixel-modal-close" id="close-settings" type="button" aria-label="Закрыть настройки"><img src="/assets/ui/larchrow/icons/icon_close.png" alt="" aria-hidden="true"></button></header>
+      <div class="pixel-modal-content settings-body">
         <section class="scan-panel" aria-live="polite"><div class="scan-title">Сканирование мира</div><div id="scan-progress">Ожидаю данные сканера…</div><div id="scan-cache">В кэше веба: 0 участков карты</div><div class="scan-track" aria-hidden="true"><span id="scan-progress-bar"></span></div></section>
         <section class="scan-panel"><div class="scan-title">Карта игрока</div><div>Загрузите файл <code>.map</code>, скачайте текущую карту или удалите импортированное открытие. При новой загрузке открытые области объединяются; очистка удаляет только импорт, собранное модом по перемещениям остаётся.</div><div class="map-import-row"><select id="map-import-player" aria-label="Игрок для импорта, скачивания или очистки"></select><button id="map-import-button" type="button">Выбрать .map</button><input id="map-import-file" type="file" accept=".map,application/octet-stream" hidden></div><div class="map-import-row"><button class="download-player-map" id="download-player-map" type="button" hidden>Скачать текущую карту .map</button></div><div class="map-import-row"><button class="clear-imported-map" id="clear-imported-map" type="button" hidden>Очистить загруженную карту</button></div><div id="map-import-status" role="status"></div></section>
         <label class="setting-option"><input id="full-map-toggle" type="checkbox"><span><strong>Показывать всю карту</strong><small>Показывает все уже отсканированные участки мира, включая не исследованные игроками.</small></span></label>
         <label class="setting-option"><input id="map-debug-toggle" type="checkbox"><span><strong>Показывать отладочное окно</strong><small>Постоянная панель слева снизу с состоянием карты и сканера.</small></span></label>
         <label class="setting-option"><input id="map-render-debug-toggle" type="checkbox"><span><strong>Нагрузка веб-рендера</strong><small>FPS, длительность задач, чанки и оценка памяти браузерных холстов.</small></span></label>
-      </div>
+      </div></div>
     </dialog><pre id="map-debug-window" aria-live="polite" hidden></pre><section id="map-render-debug-window" class="render-debug-panel" aria-live="polite" hidden></section>`,
     );
-    renderIcons(document.querySelector('#map-settings'));
-    renderIcons(document.querySelector('#map-settings-button'));
   }
   const colors = [
     '#56d49a',
@@ -59,6 +62,7 @@ const modules = await activateModules('world_map');
     fitMode: 'maximum' | 'world' | 'manual' = 'maximum',
     requestActive = false,
     renderKey = '';
+  let viewportController: MapViewportController | null = null;
   let exploredPercent = 0,
     pollTimer = null,
     livePollTimer = null,
@@ -151,6 +155,22 @@ const modules = await activateModules('world_map');
       y >= viewport.worldTop - padding &&
       y <= viewport.worldTop + viewport.worldHeight + padding,
     );
+  });
+  mapEntityLayer.setInterpolationDelay(mapDisplaySettings.interpolationMs);
+  mapEntityLayer.setAnimationEnabled(false);
+  window.addEventListener('terraria:map-display-settings', (event) => {
+    const next = (event as CustomEvent<MapDisplaySettings>).detail;
+    if (!next) return;
+    Object.assign(mapDisplaySettings, next);
+    mapEntityLayer.setInterpolationDelay(mapDisplaySettings.interpolationMs);
+    mapEntityLayer.setAnimationEnabled(
+      mapDisplaySettings.movement && scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD,
+    );
+    if (data) {
+      renderLiveLayers();
+      redrawVisiblePaths();
+      updateLiveStreamCadence();
+    }
   });
   const mapPingLayer = new MapPingLayer($('pings'));
   const routeLayer = new MapRouteLayer($('route-layer'), colors);
@@ -311,7 +331,9 @@ const modules = await activateModules('world_map');
     $('viewport').classList.add('map-loaded');
     const worldPoint = anchorX == null ? null : worldPointAt(anchorX, anchorY);
     scale = Math.max(fitScale * MIN_FIT_SCALE_RATIO, Math.min(16, next));
-    mapEntityLayer.setAnimationEnabled(scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD);
+    mapEntityLayer.setAnimationEnabled(
+      mapDisplaySettings.movement && scale > fitScale * ANIMATED_MARKER_ZOOM_THRESHOLD,
+    );
     updateLiveStreamCadence();
     const width = Math.max(1, Math.round(data.world.width * scale)),
       height = Math.max(1, Math.round(data.world.height * scale));
@@ -323,7 +345,7 @@ const modules = await activateModules('world_map');
     mapEntityLayer.refreshMarkerPositions();
     $('stage').classList.toggle('pixelated', scale >= 1);
     layoutVisibleChunks();
-    $('zoom-level').textContent = `${Math.round((scale / fitScale) * 100)}%`;
+    viewportController?.setZoomLabel(`${Math.round((scale / fitScale) * 100)}%`);
     if (worldPoint) placeWorldPoint(worldPoint.x, worldPoint.y, anchorX, anchorY);
     scheduleViewportLayerUpdate();
   };
@@ -376,9 +398,11 @@ const modules = await activateModules('world_map');
   };
   const redrawVisiblePaths = () => {
     if (!data) return;
-    const routedPlayers = (data.players || [])
-      .filter((player) => activeRoutePlayerIds.has(player.id) && playerOptions(player).route)
-      .map((player) => ({ ...player, positions: routeHistories.get(player.id) || [] }));
+    const routedPlayers = mapDisplaySettings.routes
+      ? (data.players || [])
+          .filter((player) => activeRoutePlayerIds.has(player.id) && playerOptions(player).route)
+          .map((player) => ({ ...player, positions: routeHistories.get(player.id) || [] }))
+      : [];
     routeLayer.render(playerPaths.withPaths(routedPlayers, data.world), data.players || []);
   };
   const renderToggles = () => {
@@ -514,11 +538,10 @@ const modules = await activateModules('world_map');
       }
     };
     buildNav($('players'));
-    buildNav($('drawer-players'));
   };
   const routeLoadButtonLabel = () => {
     const periodTitle = { '24h': '24 часа', '7d': '7 дней', '30d': '30 дней' }[routePeriod];
-    return `Загрузить маршруты · ${periodTitle}`;
+    return `Загрузить маршруты, ${periodTitle}`;
   };
   const saveOptions = () => {
     try {
@@ -579,10 +602,6 @@ const modules = await activateModules('world_map');
       if (!profile) return;
       await render();
       exploredPercent = Number(profile.explored_percent) || 0;
-      if (data?.world) {
-        $('subtitle').textContent =
-          `${Number(data.world.width).toLocaleString('ru-RU')} × ${Number(data.world.height).toLocaleString('ru-RU')} тайлов — изучено ${Math.round(exploredPercent)}% карты`;
-      }
     } catch (error) {
       status(
         `Не удалось обновить маску карты: ${error instanceof Error ? error.message : String(error)}`,
@@ -684,9 +703,10 @@ const modules = await activateModules('world_map');
     const routedPlayers = players
       .filter((player) => activeRoutePlayerIds.has(player.id) && playerOptions(player).route)
       .map((player) => ({ ...player, positions: routeHistories.get(player.id) || [] }));
-    const routed = modules['world_map.routes']
-      ? playerPaths.withPaths(routedPlayers, data.world)
-      : [];
+    const routed =
+      modules['world_map.routes'] && mapDisplaySettings.routes
+        ? playerPaths.withPaths(routedPlayers, data.world)
+        : [];
     const nextRouteKey = JSON.stringify(routed.map((player) => [player.id, player.pathKey]));
     if (nextRouteKey !== routeKey) {
       routeLayer.render(routed, players);
@@ -694,9 +714,10 @@ const modules = await activateModules('world_map');
     }
 
     mapEntityLayer.setWorld(data.world);
-    const markerPlayers = modules['world_map.players']
-      ? players.filter((player) => player.online === true && player.respawn_pending !== true)
-      : [];
+    const markerPlayers =
+      modules['world_map.players'] && mapDisplaySettings.players
+        ? players.filter((player) => player.online === true && player.respawn_pending !== true)
+        : [];
     const nextMarkerKey = JSON.stringify(
       markerPlayers.map((player) => [
         player.id,
@@ -720,11 +741,14 @@ const modules = await activateModules('world_map');
       markerKey = nextMarkerKey;
     }
 
-    const entityKey = modules['world_map.entities']
-      ? JSON.stringify(data.active_npcs || [])
-      : 'off';
+    const visibleEntities = modules['world_map.entities']
+      ? (data.active_npcs || []).filter((entity) =>
+          entity.boss ? mapDisplaySettings.bosses : mapDisplaySettings.npcs,
+        )
+      : [];
+    const entityKey = modules['world_map.entities'] ? JSON.stringify(visibleEntities) : 'off';
     if (entityKey !== entityRenderKey) {
-      mapEntityLayer.drawEntities(modules['world_map.entities'] ? data.active_npcs : []);
+      mapEntityLayer.drawEntities(visibleEntities);
       entityRenderKey = entityKey;
     }
     const coinKey = modules['world_map.coins'] ? JSON.stringify(data.coins || []) : 'off';
@@ -732,11 +756,14 @@ const modules = await activateModules('world_map');
       mapEntityLayer.drawDroppedCoins(modules['world_map.coins'] ? data.coins : []);
       coinRenderKey = coinKey;
     }
-    const deathKey = modules['world_map.players']
-      ? JSON.stringify([data.world?.id, data.deaths || []])
-      : 'off';
+    const deathKey =
+      modules['world_map.players'] && mapDisplaySettings.players
+        ? JSON.stringify([data.world?.id, data.deaths || []])
+        : 'off';
     if (deathKey !== deathRenderKey) {
-      mapEntityLayer.drawDeaths(modules['world_map.players'] ? data.deaths : []);
+      mapEntityLayer.drawDeaths(
+        modules['world_map.players'] && mapDisplaySettings.players ? data.deaths : [],
+      );
       deathRenderKey = deathKey;
     }
   };
@@ -774,11 +801,9 @@ const modules = await activateModules('world_map');
       mapEntityLayer.setWorld(data.world);
       mapEntityLayer.drawSpawn(data.world);
     } else $('spawn').querySelector('.spawn-marker')?.remove();
-    $('title').textContent = data.world?.name
-      ? `Карта мира — ${data.world.name}`
-      : 'Карта исследования';
-    $('subtitle').textContent =
-      `${width.toLocaleString('ru-RU')} × ${height.toLocaleString('ru-RU')} тайлов — изучено ${Math.round(exploredPercent)}% карты`;
+    document.title = data.world?.name
+      ? `Terraria — Карта мира: ${data.world.name}`
+      : 'Terraria — Карта исследования';
     renderToggles();
     updateMapImportOptions();
     const hasMap =
@@ -914,8 +939,6 @@ const modules = await activateModules('world_map');
       await render();
       if (profile) {
         exploredPercent = Number(profile.explored_percent) || 0;
-        $('subtitle').textContent =
-          `${Number(data.world.width).toLocaleString('ru-RU')} × ${Number(data.world.height).toLocaleString('ru-RU')} тайлов — изучено ${Math.round(exploredPercent)}% карты`;
       }
       if (mapVersionChanged) chunkLayerRenderer.invalidateVisibleTiles();
       if (!hadMapData || !sameWorld) openAtMaximumZoomOut();
@@ -1012,7 +1035,10 @@ const modules = await activateModules('world_map');
         const p95 = percentile(sorted, 0.95);
         // Keep the normal delay at 80 ms and add only the measured tail jitter.
         mapEntityLayer.setInterpolationDelay(
-          Math.max(80, Math.min(300, 80 + Math.max(0, p95 - median) * 1.5)),
+          Math.max(
+            mapDisplaySettings.interpolationMs,
+            Math.min(300, 80 + Math.max(0, p95 - median) * 1.5),
+          ),
         );
       }
     }
@@ -1166,8 +1192,8 @@ const modules = await activateModules('world_map');
     const overviewInterval =
       Number(data?.telemetry?.configured_intervals?.browser_overview_poll_interval_ms) || 250;
     liveStreamIntervalMs = closeUp
-      ? configuredInterval
-      : Math.max(configuredInterval, overviewInterval);
+      ? Math.max(configuredInterval, mapDisplaySettings.updateIntervalMs)
+      : Math.max(configuredInterval, overviewInterval, mapDisplaySettings.updateIntervalMs);
     params.set('interval_ms', String(liveStreamIntervalMs));
     liveSubscriptionKey = getLiveViewportKey();
     const stream = new EventSource(`/api/world-map/stream?${params}`);
@@ -1207,8 +1233,8 @@ const modules = await activateModules('world_map');
     const overviewInterval =
       Number(data?.telemetry?.configured_intervals?.browser_overview_poll_interval_ms) || 250;
     const desiredInterval = closeUp
-      ? configuredInterval
-      : Math.max(configuredInterval, overviewInterval);
+      ? Math.max(configuredInterval, mapDisplaySettings.updateIntervalMs)
+      : Math.max(configuredInterval, overviewInterval, mapDisplaySettings.updateIntervalMs);
     const desiredViewportKey = getLiveViewportKey();
     if (
       liveEventSource &&
@@ -1229,8 +1255,8 @@ const modules = await activateModules('world_map');
     const overviewInterval =
       Number(data?.telemetry?.configured_intervals?.browser_overview_poll_interval_ms) || 250;
     const pollInterval = closeUp
-      ? configuredInterval
-      : Math.max(configuredInterval, overviewInterval);
+      ? Math.max(configuredInterval, mapDisplaySettings.updateIntervalMs)
+      : Math.max(configuredInterval, overviewInterval, mapDisplaySettings.updateIntervalMs);
 
     livePollTimer = setTimeout(
       async () => {
@@ -1242,11 +1268,13 @@ const modules = await activateModules('world_map');
     );
   }
   if (debugMode) {
-    $('map-settings-button').addEventListener('click', () => {
+    const openDebugSettings = () => {
       renderScanStatus();
       $('map-settings').showModal();
       scheduleRefresh();
-    });
+    };
+    $('map-settings-button').addEventListener('click', openDebugSettings);
+    window.addEventListener('terraria:open-debug-settings', openDebugSettings);
     $('close-settings').addEventListener('click', () => $('map-settings').close());
     $('map-settings').addEventListener('click', (event) => {
       if (event.target === $('map-settings')) $('map-settings').close();
@@ -1403,7 +1431,7 @@ const modules = await activateModules('world_map');
       }
     });
   }
-  const viewportController = new MapViewportController($('viewport'), {
+  viewportController = new MapViewportController($('viewport'), {
     getScale: () => scale,
     setScale,
     worldPointAt,

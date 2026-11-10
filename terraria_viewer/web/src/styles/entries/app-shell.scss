@@ -1,8 +1,3 @@
 @use '../abstracts/tokens';
 @use '../base/document';
-@use '../components/buttons';
-@use '../layout/header';
-@use '../layout/workspace';
-@use '../components/sidebar';
-@use '../components/section-navigation';
-@use '../layout/responsive';
+@use '../components/pixel-ui';

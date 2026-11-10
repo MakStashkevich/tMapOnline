@@ -1,232 +1,155 @@
-import type { SectionModule, SectionView, View } from './core/viewer-types';
-import { renderIcons, setIcon } from './core/icons';
+import { MapActionMenu, type MapAction, type MapCategory } from './components/map-action-menu';
+import { PixelModal } from './components/pixel-modal';
+import { createMapDisplaySettingsPanel } from './components/map-display-settings';
+import type { SectionModule, SectionView } from './core/viewer-types';
 
-type ViewConfig = { title: string; description: string };
 type SiteConfig = { sections?: Partial<Record<SectionView, boolean>> };
+type SectionContent = { root: HTMLElement; title: string; dataRoot: HTMLElement };
+
+const sections: Record<SectionView, { title: string; loader: () => Promise<SectionModule> }> = {
+  world: { title: 'Данные мира', loader: () => import('./sections/world') },
+  players: { title: 'Игроки и слои карты', loader: () => import('./sections/players') },
+  bosses: { title: 'Победы над боссами', loader: () => import('./sections/bosses') },
+  server: { title: 'Состояние сервера', loader: () => import('./sections/server') },
+  activity: { title: 'События и нагрузка', loader: () => import('./sections/activity') },
+};
+
+const categories: MapCategory[] = [
+  {
+    id: 'players',
+    label: 'Игроки',
+    icon: 'player',
+    actions: [
+      { id: 'players', label: 'Игроки и слои карты', icon: 'player', view: 'players' },
+      { id: 'routes', label: 'Маршруты игроков', icon: 'routes', view: 'players' },
+    ],
+  },
+  {
+    id: 'world',
+    label: 'Мир',
+    icon: 'world',
+    actions: [
+      { id: 'world', label: 'Данные мира', icon: 'world', view: 'world' },
+      { id: 'bosses', label: 'Прогресс боссов', icon: 'bosses', view: 'bosses' },
+    ],
+  },
+  {
+    id: 'server',
+    label: 'Сервер',
+    icon: 'server',
+    actions: [
+      { id: 'server', label: 'Состояние сервера', icon: 'server', view: 'server' },
+      { id: 'activity', label: 'События и нагрузка', icon: 'activity', view: 'activity' },
+    ],
+  },
+  {
+    id: 'debug',
+    label: 'Отладка',
+    icon: 'debug',
+    actions: [{ id: 'debug', label: 'Диагностика карты', icon: 'debug', view: 'debug' }],
+  },
+  {
+    id: 'settings',
+    label: 'Настройки карты',
+    icon: 'settings',
+    actions: [{ id: 'display-settings', label: 'Слои и движение карты', icon: 'settings' }],
+  },
+];
 
 class ViewerApplication {
-  private readonly views: Record<View, ViewConfig> = {
-    map: { title: 'Карта мира', description: 'Карта исследования и текущее состояние мира.' },
-    world: {
-      title: 'Данные карты',
-      description: 'Исследование мира, сканирование и объекты карты.',
-    },
-    players: { title: 'Игроки', description: 'Онлайн, история игроков и игровые сессии.' },
-    bosses: {
-      title: 'Боссы',
-      description: 'Активные боссы мира. Нажмите, чтобы открыть страницу Terraria Wiki.',
-    },
-    server: { title: 'Сервер', description: 'Состояние Terraria, туннеля и соединения.' },
-    activity: {
-      title: 'Нагрузка и события',
-      description: 'Ресурсы компьютера, доступность и журнал событий.',
-    },
-  };
-
-  private readonly sectionLoaders: Record<SectionView, () => Promise<SectionModule>> = {
-    world: () => import('./sections/world'),
-    players: () => import('./sections/players'),
-    bosses: () => import('./sections/bosses'),
-    server: () => import('./sections/server'),
-    activity: () => import('./sections/activity'),
-  };
-
+  private readonly modal = new PixelModal();
+  private readonly menu: MapActionMenu;
   private readonly sectionModules = new Map<SectionView, SectionModule>();
-  private currentView: View = 'map';
-  private sectionRequest = 0;
+  private readonly contents = new Map<SectionView, SectionContent>();
 
-  private element<T extends HTMLElement = HTMLElement>(id: string): T {
-    const element = document.getElementById(id);
-    if (!element) throw new Error(`Required page element is missing: #${id}`);
-    return element as T;
+  constructor() {
+    this.menu = new MapActionMenu((action, trigger) => void this.openAction(action, trigger));
   }
 
-  start(): void {
-    renderIcons();
-    this.applySavedTheme();
-    this.bindNavigation();
-    this.loadEnabledSections();
-    void this.openView(this.currentView);
+  async start(): Promise<void> {
+    const availableCategories = await this.availableCategories();
+    this.menu.render(availableCategories);
   }
 
-  private applySavedTheme(): void {
-    let savedTheme: string | null = null;
+  private async availableCategories(): Promise<MapCategory[]> {
+    let config: SiteConfig = {};
     try {
-      savedTheme = localStorage.getItem('terraria-viewer-theme');
+      const response = await fetch('/api/site-config', { cache: 'no-store' });
+      if (response.ok) config = (await response.json()) as SiteConfig;
     } catch {
-      // Storage may be disabled; the page still works with its default theme.
-    }
-    this.applyTheme(savedTheme);
-  }
-
-  private applyTheme(theme: string | null): void {
-    const selectedTheme = theme === 'light' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = selectedTheme;
-
-    try {
-      localStorage.setItem('terraria-viewer-theme', selectedTheme);
-    } catch {
-      // Keep the selected theme for this page load even when persistence is unavailable.
+      /* Keep default actions available if the optional config endpoint is offline. */
     }
 
-    const themeButton = this.element('theme-toggle');
-    setIcon(themeButton, selectedTheme === 'dark' ? 'Sun' : 'Moon');
-    themeButton.setAttribute(
-      'aria-label',
-      selectedTheme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему',
-    );
+    const enabled = (view: SectionView): boolean => config.sections?.[view] !== false;
+    return categories
+      .map((category) => ({
+        ...category,
+        actions: category.actions.filter((action) =>
+          action.view === 'debug'
+            ? /^\/debug\/?$/.test(location.pathname)
+            : enabled(action.view as SectionView),
+        ),
+      }))
+      .filter((category) => category.actions.length > 0);
   }
 
-  private bindNavigation(): void {
-    this.element('theme-toggle').addEventListener('click', () => {
-      const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-      this.applyTheme(nextTheme);
-    });
-    this.element('sidebar-toggle').addEventListener('click', () => {
-      this.setDrawer(!document.body.classList.contains('drawer-open'));
-    });
-    this.element('section-menu-toggle').addEventListener('click', () => this.setDrawer(true));
-    this.element('sidebar-close').addEventListener('click', () => this.setDrawer(false));
-    this.element('sidebar-backdrop').addEventListener('click', () => this.setDrawer(false));
-
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && document.body.classList.contains('drawer-open')) {
-        this.setDrawer(false);
-      }
-    });
-
-    document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const view = button.dataset.view as View;
-        if (view in this.views) void this.openView(view);
-      });
-    });
+  private async openAction(action: MapAction, trigger: HTMLElement): Promise<void> {
+    if (action.id === 'display-settings') {
+      this.modal.open('Настройки карты', createMapDisplaySettingsPanel(), trigger);
+      return;
+    }
+    if (action.view === 'debug') {
+      window.dispatchEvent(new Event('terraria:open-debug-settings'));
+      return;
+    }
+    const view = action.view as SectionView;
+    try {
+      const content = await this.loadSection(view);
+      this.modal.open(content.title, content.root, trigger, view === 'players');
+      window.dispatchEvent(new CustomEvent('terraria:view-change', { detail: { view: 'map' } }));
+    } catch (error) {
+      const panel = document.createElement('p');
+      panel.className = 'section-error';
+      panel.textContent = `Не удалось загрузить раздел: ${error instanceof Error ? error.message : String(error)}`;
+      this.modal.open(sections[view].title, panel, trigger, view === 'players');
+    }
   }
 
-  private setDrawer(open: boolean): void {
-    const drawer = this.element('map-sidebar');
-    const backdrop = this.element('sidebar-backdrop');
-    const toggleButton = this.element('sidebar-toggle');
-
-    document.body.classList.toggle('drawer-open', open);
-    drawer.inert = !open;
-    drawer.setAttribute('aria-hidden', String(!open));
-    toggleButton.setAttribute('aria-expanded', String(open));
-    backdrop.hidden = !open;
+  private async loadSection(view: SectionView): Promise<SectionContent> {
+    const cached = this.contents.get(view);
+    if (cached) {
+      await this.sectionModules.get(view)?.mount(cached.dataRoot);
+      return cached;
+    }
+    await this.loadSectionStyle(view);
+    const module = this.sectionModules.get(view) ?? (await sections[view].loader());
+    this.sectionModules.set(view, module);
+    const root = document.createElement('div');
+    root.className = `section-content section-${view}`;
+    const sectionContent = document.createElement('div');
+    sectionContent.className = 'section-data-content';
+    root.append(sectionContent);
+    await module.mount(sectionContent);
+    const content = { root, title: sections[view].title, dataRoot: sectionContent };
+    this.contents.set(view, content);
+    return content;
   }
 
-  private async loadSectionStyle(section: SectionView): Promise<void> {
-    const existingStyle = document.querySelector<HTMLLinkElement>(
-      `link[data-section-style="${section}"]`,
-    );
-    if (existingStyle) return;
-
+  private async loadSectionStyle(view: SectionView): Promise<void> {
+    if (document.querySelector(`link[data-section-style="${view}"]`)) return;
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = `/assets/sections/${section}.css`;
-    link.dataset.sectionStyle = section;
+    link.href = `/assets/sections/${view}.css`;
+    link.dataset.sectionStyle = view;
     document.head.append(link);
-
     await new Promise<void>((resolve, reject) => {
       link.onload = () => resolve();
       link.onerror = () => {
         link.remove();
-        reject(new Error(`Could not load styles for the ${section} section`));
+        reject(new Error(`Не удалось загрузить стили: ${view}`));
       };
     });
   }
-
-  private async openView(view: View): Promise<void> {
-    this.currentView = view;
-    this.setDrawer(false);
-    this.updateNavigationState(view);
-    this.updatePageVisibility(view);
-    window.dispatchEvent(new CustomEvent('terraria:view-change', { detail: { view } }));
-
-    if (view === 'map') return;
-
-    this.showSectionLoading(view);
-    const requestId = ++this.sectionRequest;
-
-    try {
-      await this.loadSectionStyle(view);
-      const section = await this.loadSection(view);
-      if (requestId === this.sectionRequest) {
-        await section.mount(this.element('section-content'));
-      }
-    } catch (error) {
-      if (requestId === this.sectionRequest) this.showSectionError(view, error);
-    }
-  }
-
-  private updateNavigationState(view: View): void {
-    document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
-      const isActive = button.dataset.view === view;
-      button.classList.toggle('active', isActive);
-      button.setAttribute('aria-current', isActive ? 'page' : 'false');
-    });
-  }
-
-  private updatePageVisibility(view: View): void {
-    const showingMap = view === 'map';
-    this.element('map-pane').hidden = !showingMap;
-    this.element('section-pane').hidden = showingMap;
-    document.body.classList.toggle('section-view', !showingMap);
-  }
-
-  private showSectionLoading(view: SectionView): void {
-    const viewConfig = this.views[view];
-    this.element('section-title').textContent = viewConfig.title;
-    this.element('section-description').textContent = viewConfig.description;
-
-    const loadingMessage = document.createElement('div');
-    loadingMessage.className = 'section-loading';
-    loadingMessage.textContent = 'Загружаю данные…';
-    this.element('section-content').replaceChildren(loadingMessage);
-  }
-
-  private async loadSection(view: SectionView): Promise<SectionModule> {
-    const cachedSection = this.sectionModules.get(view);
-    if (cachedSection) return cachedSection;
-
-    const loadedSection = await this.sectionLoaders[view]();
-    this.sectionModules.set(view, loadedSection);
-    return loadedSection;
-  }
-
-  private showSectionError(view: SectionView, error: unknown): void {
-    const message = error instanceof Error ? error.message : String(error);
-    const panel = document.createElement('div');
-    panel.className = 'section-error';
-    panel.textContent = `Не удалось загрузить раздел: ${message}`;
-
-    const retryButton = document.createElement('button');
-    retryButton.className = 'tool';
-    retryButton.innerHTML =
-      '<i data-lucide="activity" class="ui-icon" aria-hidden="true"></i><span>Повторить</span>';
-    renderIcons(retryButton);
-    retryButton.addEventListener('click', () => void this.openView(view));
-    panel.append(retryButton);
-
-    this.element('section-content').replaceChildren(panel);
-  }
-
-  private async loadEnabledSections(): Promise<void> {
-    try {
-      const response = await fetch('/api/site-config', { cache: 'no-store' });
-      if (!response.ok) return;
-
-      const config = (await response.json()) as SiteConfig;
-      document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
-        const view = button.dataset.view;
-        if (view && view !== 'map' && config.sections?.[view as SectionView] === false) {
-          button.hidden = true;
-        }
-      });
-    } catch {
-      // Keep configured sections visible when the optional config endpoint is unavailable.
-    }
-  }
 }
 
-new ViewerApplication().start();
+void new ViewerApplication().start();
