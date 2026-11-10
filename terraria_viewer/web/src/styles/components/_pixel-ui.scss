@@ -235,12 +235,12 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 5px;
-  width: 60px;
-  padding: 6px;
-  background: #131d47;
-  border: 3px solid #11152f;
-  outline: 2px solid #6478be;
-  box-shadow: 3px 3px 0 #000;
+  width: 48px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
   text-align: center;
 }
 #zoom-level {
@@ -770,12 +770,6 @@ body {
   border: 0;
   border-image: none;
   background: transparent;
-}
-.pixel-zoom-controls {
-  border: 6px solid transparent;
-  border-image: url('/assets/ui/larchrow/components/panel_dark_48x48.png') 6 fill / 6px stretch;
-  background: transparent;
-  box-shadow: 3px 3px 0 #000;
 }
 .pixel-zoom-controls .pixel-icon-button {
   width: 48px;
