@@ -1,15 +1,14 @@
 type RenderMetrics = {
-  visibleCanvases: number;
+  visibleTiles: number;
   lastRenderDurationMs: number;
   lastRenderChunkCount: number;
   rendering: boolean;
-  canvasBytes: number;
-  decodedChunkCount: number;
-  decodedBitmapBytes?: number;
-  bitmapCacheHits?: number;
-  bitmapCacheMisses?: number;
+  cachedPngBytes: number;
+  cachedPngTiles: number;
+  imageCacheHits?: number;
+  imageCacheMisses?: number;
   sharedTileLoads?: number;
-  bitmapCacheEvictions?: number;
+  imageCacheEvictions?: number;
   pendingTileLoads?: number;
   failedRenderCount?: number;
   spawnMarkerVisible: boolean;
@@ -199,10 +198,9 @@ export class MapRenderDebugPanel {
       <div class="render-debug-section-title">Память</div>
       <div class="render-debug-rows">
         ${row('JavaScript', memoryValue)}
-        ${row('Холсты карты', `~${this.formatBytes(render.canvasBytes)}`)}
-        ${row('Холсты чанков', String(render.visibleCanvases))}
-        ${row('Декодированные тайлы', `${render.decodedChunkCount} — ~${this.formatBytes(render.decodedBitmapBytes ?? render.decodedChunkCount * 64 * 64 * 4)}`)}
-        ${row('Кэш браузера', `${render.bitmapCacheHits ?? 0} попаданий, ${render.bitmapCacheMisses ?? 0} запросов, ${render.pendingTileLoads ?? 0} ожидает`)}
+        ${row('Изображения чанков', String(render.visibleTiles))}
+        ${row('Кэш PNG чанков', `${render.cachedPngTiles} — ~${this.formatBytes(render.cachedPngBytes)}`)}
+        ${row('Кэш тайлов', `${render.imageCacheHits ?? 0} попаданий, ${render.imageCacheMisses ?? 0} запросов, ${render.pendingTileLoads ?? 0} ожидает`)}
         ${row('Повторно использовано запросов', String(render.sharedTileLoads ?? 0))}
         ${row('Повторов рендера', String(render.failedRenderCount ?? 0))}
       </div>

@@ -73,7 +73,7 @@ export function playerOutlineColor(team: number | null | undefined): string {
 export function createOutlinedSprite(
   source: HTMLImageElement,
   innerOutlineColor: string,
-): HTMLCanvasElement | null {
+): HTMLImageElement | null {
   if (source.naturalWidth < 1 || source.naturalHeight < 1) return null;
 
   const padding = 4;
@@ -91,7 +91,13 @@ export function createOutlinedSprite(
   drawOutlineRing(context, blackSilhouette, padding, 4);
   drawOutlineRing(context, teamSilhouette, padding, 2);
   context.drawImage(source, padding, padding);
-  return canvas;
+
+  // Keep a stable image surface for Safari instead of leaving a canvas in the live marker layer.
+  const sprite = new Image();
+  sprite.alt = '';
+  sprite.decoding = 'async';
+  sprite.src = canvas.toDataURL('image/png');
+  return sprite;
 }
 
 function createTintedSilhouette(source: HTMLImageElement, color: string): HTMLCanvasElement | null {

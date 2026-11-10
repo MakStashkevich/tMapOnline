@@ -1,8 +1,10 @@
+import { MapZoomControls } from './map-zoom-controls';
+
 type WorldPoint = { x: number; y: number };
 type PointerPosition = { x: number; y: number };
 type DragStart = PointerPosition & { left: number; top: number };
 type PinchStart = WorldPoint & { distance: number; scale: number };
-import { MapZoomControls } from './map-zoom-controls';
+type PinchUpdate = { scale: number; anchorX: number; anchorY: number };
 
 export type MapViewportBindings = {
   getScale(): number;
@@ -25,6 +27,8 @@ export class MapViewportController {
   private pinchStart: PinchStart | null = null;
   private dragStart: DragStart | null = null;
   private resizeFrame: number | null = null;
+  private pinchFrame: number | null = null;
+  private pendingPinchUpdate: PinchUpdate | null = null;
   private lastTap: { at: number; x: number; y: number } | null = null;
   private readonly zoomControls = new MapZoomControls();
 
@@ -154,12 +158,36 @@ export class MapViewportController {
     const anchorX = (first.x + second.x) / 2 - bounds.left;
     const anchorY = (first.y + second.y) / 2 - bounds.top;
 
-    this.bindings.prioritizeWorldPoint?.({ x: this.pinchStart!.x, y: this.pinchStart!.y });
-    this.bindings.setScale((this.pinchStart!.scale * currentDistance) / this.pinchStart!.distance);
-    this.bindings.placeWorldPoint(this.pinchStart!.x, this.pinchStart!.y, anchorX, anchorY);
+    this.pendingPinchUpdate = {
+      scale: (this.pinchStart!.scale * currentDistance) / this.pinchStart!.distance,
+      anchorX,
+      anchorY,
+    };
+    if (this.pinchFrame !== null) return;
+
+    this.pinchFrame = requestAnimationFrame(() => {
+      this.pinchFrame = null;
+      this.applyPendingPinchUpdate();
+    });
+  }
+
+  private applyPendingPinchUpdate(): void {
+    const update = this.pendingPinchUpdate;
+    this.pendingPinchUpdate = null;
+    if (!update || !this.pinchStart) return;
+
+    this.bindings.prioritizeWorldPoint?.({ x: this.pinchStart.x, y: this.pinchStart.y });
+    this.bindings.setScale(update.scale);
+    this.bindings.placeWorldPoint(
+      this.pinchStart.x,
+      this.pinchStart.y,
+      update.anchorX,
+      update.anchorY,
+    );
   }
 
   private onPointerEnd(event: PointerEvent): void {
+    this.flushPendingPinchUpdate();
     const endedPointer = this.pointers.get(event.pointerId);
     const dragStart = this.dragStart;
     const wasTap =
@@ -182,6 +210,14 @@ export class MapViewportController {
       this.dragStart = null;
       this.viewport.classList.remove('dragging');
     }
+  }
+
+  private flushPendingPinchUpdate(): void {
+    if (this.pinchFrame !== null) {
+      cancelAnimationFrame(this.pinchFrame);
+      this.pinchFrame = null;
+    }
+    this.applyPendingPinchUpdate();
   }
 
   private detectMapPing(event: PointerEvent, start: DragStart): void {

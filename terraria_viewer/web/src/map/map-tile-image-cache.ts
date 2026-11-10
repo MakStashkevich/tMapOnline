@@ -1,7 +1,7 @@
-/** Keeps decoded tile images in a small, reusable least-recently-used cache. */
-export class MapTileBitmapCache {
-  private readonly bitmaps = new Map<string, ImageBitmap>();
-  private readonly pendingLoads = new Map<string, PendingBitmapLoad>();
+/** Keeps compressed PNG tile data in a small, reusable least-recently-used cache. */
+export class MapTileImageCache {
+  private readonly blobs = new Map<string, Blob>();
+  private readonly pendingLoads = new Map<string, PendingBlobLoad>();
   private cachedBytes = 0;
   private hits = 0;
   private misses = 0;
@@ -12,10 +12,6 @@ export class MapTileBitmapCache {
     private readonly capacity: number,
     private readonly byteCapacity = 4 * 1024 * 1024,
   ) {}
-
-  get size(): number {
-    return this.bitmaps.size;
-  }
 
   getMetrics(): {
     entries: number;
@@ -28,7 +24,7 @@ export class MapTileBitmapCache {
     pendingLoads: number;
   } {
     return {
-      entries: this.bitmaps.size,
+      entries: this.blobs.size,
       bytes: this.cachedBytes,
       byteCapacity: this.byteCapacity,
       hits: this.hits,
@@ -39,12 +35,12 @@ export class MapTileBitmapCache {
     };
   }
 
-  getOrLoad(key: string, load: () => Promise<ImageBitmap>): Promise<ImageBitmap> {
-    const cached = this.bitmaps.get(key);
+  getOrLoad(key: string, load: () => Promise<Blob>): Promise<Blob> {
+    const cached = this.blobs.get(key);
     if (cached) {
       this.hits += 1;
-      this.bitmaps.delete(key);
-      this.bitmaps.set(key, cached);
+      this.blobs.delete(key);
+      this.blobs.set(key, cached);
       return Promise.resolve(cached);
     }
 
@@ -55,17 +51,12 @@ export class MapTileBitmapCache {
     }
     this.misses += 1;
 
-    const request: PendingBitmapLoad = { promise: null, valid: true };
+    const request: PendingBlobLoad = { promise: null, valid: true };
     const pendingLoad = Promise.resolve()
       .then(load)
-      .then((bitmap) => {
-        if (!request.valid) {
-          bitmap.close();
-          return bitmap;
-        }
-
-        this.keep(key, bitmap);
-        return bitmap;
+      .then((blob) => {
+        if (request.valid) this.keep(key, blob);
+        return blob;
       })
       .finally(() => {
         if (this.pendingLoads.get(key) === request) this.pendingLoads.delete(key);
@@ -81,36 +72,33 @@ export class MapTileBitmapCache {
     if (pendingLoad) pendingLoad.valid = false;
     this.pendingLoads.delete(key);
 
-    const bitmap = this.bitmaps.get(key);
-    if (!bitmap) return;
+    const blob = this.blobs.get(key);
+    if (!blob) return;
 
-    this.bitmaps.delete(key);
-    this.cachedBytes -= bitmap.width * bitmap.height * 4;
-    bitmap.close();
+    this.blobs.delete(key);
+    this.cachedBytes -= blob.size;
   }
 
   clear(): void {
     for (const pendingLoad of this.pendingLoads.values()) pendingLoad.valid = false;
     this.pendingLoads.clear();
-    for (const bitmap of this.bitmaps.values()) bitmap.close();
-    this.bitmaps.clear();
+    this.blobs.clear();
     this.cachedBytes = 0;
   }
 
-  private keep(key: string, bitmap: ImageBitmap): void {
-    this.bitmaps.set(key, bitmap);
-    this.cachedBytes += bitmap.width * bitmap.height * 4;
-    while (this.bitmaps.size > this.capacity || this.cachedBytes > this.byteCapacity) {
-      const oldestKey = this.bitmaps.keys().next().value;
+  private keep(key: string, blob: Blob): void {
+    this.blobs.set(key, blob);
+    this.cachedBytes += blob.size;
+    while (this.blobs.size > this.capacity || this.cachedBytes > this.byteCapacity) {
+      const oldestKey = this.blobs.keys().next().value;
       if (oldestKey === undefined) return;
 
-      const oldestBitmap = this.bitmaps.get(oldestKey);
-      this.bitmaps.delete(oldestKey);
-      if (oldestBitmap) this.cachedBytes -= oldestBitmap.width * oldestBitmap.height * 4;
-      oldestBitmap?.close();
+      const oldestBlob = this.blobs.get(oldestKey);
+      this.blobs.delete(oldestKey);
+      if (oldestBlob) this.cachedBytes -= oldestBlob.size;
       this.evictions += 1;
     }
   }
 }
 
-type PendingBitmapLoad = { promise: Promise<ImageBitmap> | null; valid: boolean };
+type PendingBlobLoad = { promise: Promise<Blob> | null; valid: boolean };
