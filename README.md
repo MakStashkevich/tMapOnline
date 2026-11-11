@@ -1,5 +1,5 @@
 <div align="center">
-  <h1 align="center">tMapOnline</h1>
+  <h1 align="center"><img src="docs/images/map-markers/rabbit.png" width="32" height="32" alt="кролик" align="absmiddle"> tMapOnline</h1>
   <p><strong>Карта мира Terraria в браузере, которую я сделал для игры с друзьями.</strong></p>
   <p>Полноэкранная карта · live-позиции игроков и NPC · маршруты и исследование · серверный tModLoader-мод</p>
 </div>
@@ -29,7 +29,7 @@
 - локальные игровые фоновые текстуры, пиксельные меню, подсказки и карту на мобильных устройствах;
 - состояние сервера, историю игроков и сессий, прогресс боссов, нагрузку и сгруппированные события.
 
-На карте видно игроков <img src="docs/images/map-markers/player.png" width="22" height="22" alt="спрайт игрока" align="absmiddle">, головы NPC <img src="docs/images/map-markers/npc-example.png" width="22" height="22" alt="спрайт NPC" align="absmiddle"> и боссов — например, Стену плоти <img src="docs/images/map-markers/boss-wall-of-flesh.png" width="22" height="22" alt="спрайт Стены плоти" align="absmiddle">. Рядом с пилонами <img src="docs/images/map-markers/pylon.png" width="22" height="22" alt="спрайт пилона" align="absmiddle">, монетами <img src="docs/images/map-markers/gold-coin.png" width="22" height="22" alt="золотая монета" align="absmiddle">, точкой появления <img src="docs/images/map-markers/spawn.png" width="22" height="22" alt="точка появления" align="absmiddle">, местами смерти <img src="docs/images/map-markers/death.png" width="22" height="22" alt="место смерти" align="absmiddle"> и Map Ping <img src="docs/images/map-markers/map-ping.png" width="22" height="22" alt="спрайт Map Ping" align="absmiddle"> тоже стоят их игровые спрайты.
+На карте видно игроков <img src="docs/images/map-markers/player.png" width="22" height="22" alt="спрайт игрока" align="absmiddle">, головы NPC <img src="docs/images/map-markers/npc-example.png" width="22" height="22" alt="спрайт NPC" align="absmiddle"> и боссов — например, Стену плоти <img src="docs/images/map-markers/boss-wall-of-flesh.png" width="22" height="22" alt="спрайт Стены плоти" align="absmiddle">. Рядом с пилонами <img src="docs/images/map-markers/pylon.png" width="22" height="22" alt="спрайт пилона" align="absmiddle">, монетами <img src="docs/images/map-markers/gold-coin.png" width="22" height="22" alt="золотая монета" align="absmiddle">, точкой появления <img src="docs/images/map-markers/spawn.png" width="22" height="22" alt="точка появления" align="absmiddle">, местами смерти <img src="docs/images/map-markers/death.png" width="22" height="22" alt="место смерти" align="absmiddle"> и Map Ping <img src="docs/images/map-markers/map-ping.gif" width="22" height="22" alt="спрайт Map Ping" align="absmiddle"> тоже стоят их игровые спрайты.
 
 Слои и визуальные параметры переключаются в вебе отдельно у каждого пользователя. Серверная конфигурация включает модули и задаёт исходные параметры сбора данных.
 
