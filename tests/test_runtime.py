@@ -11,8 +11,8 @@ from pathlib import Path
 from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from terraria_viewer.config import DEFAULT_CONFIG
-from terraria_viewer.runtime import STOP, run_local
+from tmaponline.config import DEFAULT_CONFIG
+from tmaponline.runtime import STOP, run_local
 
 
 def unused_port() -> int:
@@ -21,7 +21,7 @@ def unused_port() -> int:
         return sock.getsockname()[1]
 
 
-class ViewerRuntimeTests(unittest.TestCase):
+class TMapOnlineRuntimeTests(unittest.TestCase):
     def test_serve_runtime_starts_and_stops_without_game_or_network(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)
         with tempfile.TemporaryDirectory() as temporary:
@@ -42,12 +42,12 @@ class ViewerRuntimeTests(unittest.TestCase):
                     except OSError:
                         time.sleep(0.05)
                 else:
-                    self.fail("Viewer serve mode did not start")
+                    self.fail("tMapOnline serve mode did not start")
             finally:
                 STOP.set()
                 worker.join(timeout=4)
                 STOP.clear()
-            self.assertFalse(worker.is_alive(), "Viewer serve mode did not stop cleanly")
+            self.assertFalse(worker.is_alive(), "tMapOnline serve mode did not stop cleanly")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from typing import cast
 
 from PIL import Image
 
-from terraria_viewer.sprite_renderer import (
+from tmaponline.sprite_renderer import (
     MapItemSpriteRenderer,
     NpcSpriteRenderer,
     XnbTextureReader,

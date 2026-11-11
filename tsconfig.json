@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "types": []
   },
-  "include": ["terraria_viewer/web/src/**/*.ts"]
+  "include": ["tmaponline/web/src/**/*.ts"]
 }

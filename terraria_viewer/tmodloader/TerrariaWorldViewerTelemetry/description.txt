@@ -1,1 +1,0 @@
-Server-only telemetry bridge for the Terraria world viewer. Streams live world, progression and player snapshots to 127.0.0.1 over TCP. Clients do not need to download this mod.

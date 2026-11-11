@@ -11,7 +11,7 @@ from typing import Any, cast
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from terraria_viewer.backend.services.map_tile_pyramid import MapTilePyramid
+from tmaponline.backend.services.map_tile_pyramid import MapTilePyramid
 
 
 class MapTilePyramidTests(unittest.TestCase):

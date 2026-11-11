@@ -1,5 +1,5 @@
 {
-  "name": "terraria-world-viewer-web",
+  "name": "tmaponline-web",
   "private": true,
   "type": "module",
   "scripts": {
@@ -7,8 +7,8 @@
     "typecheck": "tsc --noEmit",
     "test:web": "node --experimental-transform-types --test tests/web/*.test.mjs",
     "check:python": "pyright",
-    "check:format": "prettier --check \"terraria_viewer/web/src/**/*.{ts,scss}\" \"terraria_viewer/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",
-    "format": "prettier --write \"terraria_viewer/web/src/**/*.{ts,scss}\" \"terraria_viewer/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",
+    "check:format": "prettier --check \"tmaponline/web/src/**/*.{ts,scss}\" \"tmaponline/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",
+    "format": "prettier --write \"tmaponline/web/src/**/*.{ts,scss}\" \"tmaponline/web/**/*.html\" \"tools/**/*.mjs\" \"*.json\" \"*.yaml\" \"docs/**/*.md\" \"README.md\"",
     "check:web": "npm run check:format && npm run typecheck && npm run build",
     "check:all": "npm run check:web && npm run check:python"
   },

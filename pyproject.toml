@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "terraria-world-viewer"
+name = "tmaponline"
 version = "0.1.0"
-description = "Modular local Terraria world viewer, telemetry service, and tModLoader server mod"
+description = "tMapOnline browser world map, local telemetry service, and tModLoader server mod"
 requires-python = ">=3.9"
 dependencies = ["PyYAML>=6.0,<7", "Pillow>=10,<12"]
 
@@ -13,17 +13,17 @@ dependencies = ["PyYAML>=6.0,<7", "Pillow>=10,<12"]
 dev = ["types-PyYAML>=6.0", "types-Pillow>=10,<12"]
 
 [project.scripts]
-terraria-viewer = "terraria_viewer.__main__:main"
+tmaponline = "tmaponline.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["terraria_viewer*"]
+include = ["tmaponline*"]
 
 [tool.setuptools.package-data]
-terraria_viewer = ["web/**/*.html", "web/**/*.css", "web/**/*.js", "web/**/*.ts", "web/**/*.scss", "sprite_renderer/LICENSE-lzx.txt"]
+tmaponline = ["web/**/*.html", "web/**/*.css", "web/**/*.js", "web/**/*.ts", "web/**/*.scss", "sprite_renderer/LICENSE-lzx.txt"]
 
 [tool.pyright]
-include = ["terraria_viewer", "tests", "tools"]
+include = ["tmaponline", "tests", "tools"]
 exclude = ["**/__pycache__", "**/node_modules", "**/.venv", "dist", "tmodloader"]
 venvPath = "."
 venv = ".venv"

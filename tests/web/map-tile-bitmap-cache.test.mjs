@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { MapTileBitmapCache } from '../../terraria_viewer/web/src/map/map-tile-bitmap-cache.ts';
+import { MapTileBitmapCache } from '../../tmaponline/web/src/map/map-tile-bitmap-cache.ts';
 
 function makeBitmap() {
   return {

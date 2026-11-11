@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from terraria_viewer.models import LiveTelemetrySnapshot
+from tmaponline.models import LiveTelemetrySnapshot
 
 
 class LiveTelemetryModelTests(unittest.TestCase):

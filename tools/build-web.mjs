@@ -5,9 +5,9 @@ import { build } from 'esbuild';
 import * as sass from 'sass';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const sourceRoot = join(projectRoot, 'terraria_viewer', 'web', 'src');
-const assetRoot = join(projectRoot, 'terraria_viewer', 'web', 'assets');
-const staticRoot = join(projectRoot, 'terraria_viewer', 'web', 'static');
+const sourceRoot = join(projectRoot, 'tmaponline', 'web', 'src');
+const assetRoot = join(projectRoot, 'tmaponline', 'web', 'assets');
+const staticRoot = join(projectRoot, 'tmaponline', 'web', 'static');
 const styleRoot = join(sourceRoot, 'styles', 'entries');
 
 await rm(assetRoot, { recursive: true, force: true });

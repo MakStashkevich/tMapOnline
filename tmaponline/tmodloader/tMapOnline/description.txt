@@ -1,0 +1,1 @@
+tMapOnline server mod. Sends live world, progression, player, NPC and map data to the local tMapOnline web service over loopback TCP. Relays map pings between the web map and connected players. Clients do not need to install this mod.

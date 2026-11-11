@@ -10,7 +10,7 @@ terraria:
   game_port: 7777
   max_players: 8
 storage:
-  data_dir: ~/Library/Application Support/TerrariaWorldViewer
+  data_dir: ~/Library/Application Support/tMapOnline
   death_retention_seconds: 3600
   event_retention_seconds: 2592000
   event_max_entries: 5000

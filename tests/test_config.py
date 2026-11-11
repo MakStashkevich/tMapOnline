@@ -6,10 +6,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from terraria_viewer.config import load_config, page_enabled, site_config_enabled
+from tmaponline.config import load_config, page_enabled, site_config_enabled
 
 
-class ViewerConfigTests(unittest.TestCase):
+class TMapOnlineConfigTests(unittest.TestCase):
     def test_defaults_include_modular_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config = load_config(Path(temporary) / "config.yaml")

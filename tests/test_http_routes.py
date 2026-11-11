@@ -11,11 +11,11 @@ from urllib.request import urlopen
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from terraria_viewer.backend.http import start_dashboard
-from terraria_viewer.backend.store import StatusStore
+from tmaponline.backend.http import start_dashboard
+from tmaponline.backend.store import StatusStore
 
 
-class ViewerRouteTests(unittest.TestCase):
+class TMapOnlineRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)

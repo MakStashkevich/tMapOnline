@@ -13,8 +13,8 @@ from typing import Any
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from terraria_viewer.telemetry.stream import TelemetryStreamClient
-from terraria_viewer.backend.store import StatusStore
+from tmaponline.telemetry.stream import TelemetryStreamClient
+from tmaponline.backend.store import StatusStore
 
 
 def main() -> None:
