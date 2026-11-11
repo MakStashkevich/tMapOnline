@@ -1,39 +1,38 @@
 <div align="center">
-  <h1 align="center"><img src="docs/images/map-markers/rabbit.png" height="32" alt="кролик" align="absmiddle"> tMapOnline</h1>
-  <p><strong>онлайн-карта Terraria в реальном времени – общий мир и всё, что происходит в нём прямо сейчас.</strong></p>
-  <p>Исследование мира · игроки и NPC · боссы · маршруты · Map Ping между браузером и игрой</p>
+  <h1 align="center"><img src="docs/images/map-markers/rabbit.png" height="32" alt="rabbit" align="absmiddle"> tMapOnline</h1>
+  <p><strong>A real-time online Terraria map – one shared world, and everything happening in it right now.</strong></p>
+  <p>World exploration · players and NPCs · bosses · routes · Map Ping between browser and game</p>
+  <p><a href="README.md">🇺🇸 English</a> · <a href="README_RU.md">🇷🇺 Русский</a> · <a href="README_UK.md">🇺🇦 Українська</a> · <a href="README_FR.md">🇫🇷 Français</a> · <a href="README_JA.md">🇯🇵 日本語</a> · <a href="README_ZH_CN.md">🇨🇳 简体中文</a> · <a href="README_KO.md">🇰🇷 한국어</a></p>
 </div>
 
-мы с друзьями играли в Terraria, и мой друг всё открывал новые места, биомы и строил дома. однажды он спросил: «а можно увидеть открытия всех игроков сразу?» я не нашёл готовой карты, которая показывала бы общий прогресс команды и происходящее в мире онлайн, и решил попробовать сделать такую сам. так появился tMapOnline.
+we were playing Terraria with friends. one of them loved finding new places, exploring biomes, and building houses. one day he asked: “could we see what everyone has explored on one map?” i couldn't find a ready-made map that showed the team's shared progress and what was happening in the world live, so i decided to try making one. that's how tMapOnline started.
 
-сначала это была обычная страница с состоянием сервера – сколько он работает и сколько памяти использует. потом появились игроки, NPC, боссы и их спрайты, а за ними и сама карта. теперь я могу открыть её в браузере, посмотреть, что происходит в мире, и даже помочь другу с телефона: поставить Map Ping, и отметка появится у него в игре. самому запускать Terraria для этого не нужно.
+it began as a simple server status page – how long the server had been running and how much memory it used. then i added players, NPCs, bosses, and their sprites. the map came later. now i can open it in a browser, see what's going on, and help a friend from my phone: i place a Map Ping and it appears in their game. i don't need to launch Terraria myself.
 
-для этого проект состоит из веб-карты и серверного мода `tMapOnline` для tModLoader. исходники можно использовать и менять для своего сервера; как это установить, объяснено ниже.
+## what's on the map
 
-## что видно на карте
+- shared world exploration and player routes for the period set in the server config;
+- players, NPC and boss heads, pylons, coins, spawn point, death markers, and Map Ping;
+- live tile changes and unexplored areas shaded with soft edges and lighting;
+- Terraria background textures, a pixel-style menu, and tooltips, including on phones;
+- player and session history, boss progress, server status, resource usage, and grouped events.
 
-- общий прогресс исследования мира и маршруты игроков за срок из серверной конфигурации;
-- игроков, головы NPC и боссов, пилоны, монеты, точку появления, места смерти и Map Ping;
-- динамические изменения тайлов и затемнение неразведанных участков с плавным краем и влиянием освещения;
-- фоновые текстуры Terraria, пиксельное меню и подсказки, в том числе на телефоне;
-- историю игроков и сессий, прогресс боссов, состояние сервера, нагрузку и сгруппированные события.
+the map uses in-game sprites for players <img src="docs/images/map-markers/player.png" height="22" alt="player sprite" align="absmiddle">, NPC heads <img src="docs/images/map-markers/npc-example.png" height="22" alt="NPC sprite" align="absmiddle">, and bosses – for example, the Wall of Flesh <img src="docs/images/map-markers/boss-wall-of-flesh.png" height="22" alt="Wall of Flesh sprite" align="absmiddle">. pylons <img src="docs/images/map-markers/pylon.png" height="22" alt="pylon sprite" align="absmiddle">, gold coins <img src="docs/images/map-markers/gold-coin.png" height="22" alt="gold coin" align="absmiddle">, the spawn point <img src="docs/images/map-markers/spawn.png" height="22" alt="spawn point" align="absmiddle">, death markers <img src="docs/images/map-markers/death.png" height="22" alt="death marker" align="absmiddle">, and Map Ping <img src="docs/images/map-markers/map-ping.gif" height="22" alt="Map Ping sprite" align="absmiddle"> use them too.
 
-на карте видны игроки <img src="docs/images/map-markers/player.png" height="22" alt="спрайт игрока" align="absmiddle">, головы NPC <img src="docs/images/map-markers/npc-example.png" height="22" alt="спрайт NPC" align="absmiddle"> и боссы — например, Стена плоти <img src="docs/images/map-markers/boss-wall-of-flesh.png" height="22" alt="спрайт Стены плоти" align="absmiddle">. рядом с пилонами <img src="docs/images/map-markers/pylon.png" height="22" alt="спрайт пилона" align="absmiddle">, золотыми монетами <img src="docs/images/map-markers/gold-coin.png" height="22" alt="золотая монета" align="absmiddle">, точкой появления <img src="docs/images/map-markers/spawn.png" height="22" alt="точка появления" align="absmiddle">, местами смерти <img src="docs/images/map-markers/death.png" height="22" alt="место смерти" align="absmiddle"> и Map Ping <img src="docs/images/map-markers/map-ping.gif" height="22" alt="спрайт Map Ping" align="absmiddle"> стоят их игровые спрайты.
+display settings belong to each browser. you can choose which players and layers to show, enable routes, or change animation; these preferences stay in that browser's `localStorage` and do not affect what other players see. the server owner sets the service address, update frequency, data retention, and available features in the YAML config.
 
-у каждого игрока свои настройки отображения. например, можно скрыть слой NPC или включить маршруты – эти настройки сохраняются только в своём браузере, в `localStorage`. они не меняют то, что увидят друзья. а адрес сервиса, частоту обновлений и срок хранения данных задаёт владелец сервера в YAML-конфиге.
+## run it
 
-## запуск
+you need Python 3.9 or newer. install tModLoader if you want tMapOnline to start a local game server too. node.js is only needed to build the web interface.
 
-для работы нужны Python 3.9+ и установленный tModLoader, если запускаешь вместе с игровым сервером. Node.js нужен только чтобы собрать веб-интерфейс.
-
-сначала собери веб-ресурсы. скомпилированная папка `tmaponline/web/assets` не хранится в Git и появляется после сборки:
+first build the web files. the generated `tmaponline/web/assets` directory is not stored in Git; the build creates it:
 
 ```sh
 npm ci
 npm run build
 ```
 
-затем установи tMapOnline и скопируй пример конфигурации:
+then install tMapOnline and copy the example config:
 
 ```sh
 python3 -m venv .venv
@@ -42,61 +41,51 @@ python3 -m pip install -e .
 cp config.example.yaml config.local.yaml
 ```
 
-чтобы запустить веб-карту вместе с локальным сервером Terraria:
+to start the web map together with a local Terraria server:
 
 ```sh
 tmaponline --config config.local.yaml run
 ```
 
-если игровой сервер уже управляется отдельно, запусти только веб API и карту:
+if the game server is managed separately, start only the web service:
 
 ```sh
 tmaponline --config config.local.yaml serve
 ```
 
-теперь открой адрес из `server.host` и `server.port`. если настройки не менялись, это `http://127.0.0.1:8765`. команда `run` запускает игровой сервер, указанный в конфиге. если его порт уже занят, tMapOnline не будет останавливать чужой процесс.
+open the address from `server.host` and `server.port`. by default, it is `http://127.0.0.1:8765`. the `run` command starts the game server specified in the config. if another process is already using its port, tMapOnline leaves it alone.
 
-### серверный мод
+### server mod
 
-мод нужен только на серверном экземпляре tModLoader — игрокам устанавливать его не надо. он открывает TCP listener на loopback-интерфейсе и передаёт веб-сервису состояние мира. Map Ping из веба он пересылает подключённым игрокам.
+the mod is needed only on the server's tModLoader installation; players do not need to install it. it sends world data to the web service and forwards Map Ping from the browser to connected players.
 
-сборка мода:
+build the mod with the tModLoader version used by your server:
 
 ```sh
 TML_ROOT="/path/to/tModLoader" python3 tools/build-mod.py
 ```
 
-сборщик использует изолированный профиль tModLoader и кладёт пакет в `dist/tMapOnline.tmod`. установленный мод работающего сервера он не перезаписывает. скопируй пакет в Mods серверного профиля и включи `tMapOnline` в списке модов. сервер перезапускай только когда в мире никого нет.
+the build script places `dist/tMapOnline.tmod` in the project. it does not replace the mod installed on a running server. copy the package to the server profile's Mods folder and enable `tMapOnline`. restart the server only when nobody is playing.
 
-### проверки и повторная сборка
+### checks and rebuilds
 
-после изменений веб-исходников пересобери интерфейс:
+after changing the web source, rebuild the interface:
 
 ```sh
 npm ci
 npm run build
 ```
 
-для проверки есть `npm run typecheck`, `npm run check:python`, `npm run check:web` и `npm run check:all`. команда `npm run check:web` также пересобирает интерфейс.
+available checks: `npm run typecheck`, `npm run check:python`, `npm run check:web`, and `npm run check:all`. `npm run check:web` also rebuilds the interface.
 
-## конфигурация и данные
+## config and data
 
-пример серверного конфига лежит в [config.example.yaml](config.example.yaml), а объяснение параметров — в [docs/configuration.md](docs/configuration.md).
+the example server config is in [config.example.yaml](config.example.yaml). the detailed config reference and other technical docs are currently in Russian: [server settings](docs/configuration.md), [architecture](docs/architecture.md), [web map](docs/web-map.md), [server mod](docs/mod.md), [telemetry and HTTP API](docs/telemetry.md), and [updating](docs/migration.md).
 
-по умолчанию данные tMapOnline хранятся в `~/Library/Application Support/tMapOnline`: там кэш карты, история игроков, импортированные карты и прогресс боссов. путь можно поменять через `storage.data_dir` в YAML-конфиге.
+by default, tMapOnline stores data in `~/Library/Application Support/tMapOnline`. this folder contains map cache, player history, imported maps, and boss progress. you can change the path with `storage.data_dir` in the server YAML config.
 
-## остальная документация
+## license and attribution
 
-- [Архитектура и границы модулей](docs/architecture.md)
-- [Как устроены карта и её слои](docs/web-map.md)
-- [Серверный мод tMapOnline](docs/mod.md)
-- [Настройки сервера](docs/configuration.md)
-- [Телеметрия и HTTP API](docs/telemetry.md)
-- [Миграция и обновление](docs/migration.md)
-- [Контекст для LLM и правила сопровождения](llms.txt)
+the source code is available under the MIT License. you can use it, change it, include it in commercial projects, and redistribute it. if you make a fork or build a project based on tMapOnline, keep the [LICENSE](LICENSE) file and a link to the source: [tMapOnline on GitHub](https://github.com/MakStashkevich/tMapOnline).
 
-## лицензия и авторство
-
-я распространяю исходники `tMapOnline` под MIT License. их можно использовать, менять, включать в коммерческие проекты и распространять дальше. если будешь делать форк или собирать на основе tMapOnline свой проект, оставь файл [LICENSE](LICENSE) и ссылку на исходный код — так будет понятно, откуда всё началось: [tMapOnline на GitHub](https://github.com/MakStashkevich/tMapOnline).
-
-у отдельных ресурсов могут быть свои условия. например, [LICENSE-lzx.txt](tmaponline/sprite_renderer/LICENSE-lzx.txt) относится к LZX-компоненту, а не ко всему проекту. перед распространением проверь лицензии изображений, шрифтов и сторонних инструментов.
+some assets have their own terms. for example, [LICENSE-lzx.txt](tmaponline/sprite_renderer/LICENSE-lzx.txt) applies to the LZX component, not the whole project. check the licenses for images, fonts, and third-party tools before redistributing them.
