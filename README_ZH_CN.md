@@ -11,6 +11,8 @@
 
 ## 地图上有什么
 
+![tMapOnline 世界地图](docs/images/world-map-overview.png)
+
 - 团队共享的世界探索进度，以及服务器配置指定时间段内的玩家路线；
 - 玩家、NPC 和 Boss 头像、传送晶塔、硬币、出生点、死亡标记和 Map Ping；
 - 实时方块变化，以及受光照影响、边缘柔和的未探索区域阴影；
@@ -69,7 +71,7 @@ TML_ROOT="/path/to/tModLoader" python3 tools/build-mod.py
 
 ## 配置和数据
 
-示例配置见 [config.example.yaml](config.example.yaml)。详细技术文档目前只有俄语版：[服务器配置](docs/configuration.md)、[架构](docs/architecture.md)、[网页地图](docs/web-map.md)、[服务器模组](docs/mod.md)、[遥测与 HTTP API](docs/telemetry.md)、[更新](docs/migration.md)。
+示例配置见 [config.example.yaml](config.example.yaml)。详细技术文档提供简体中文版：[服务器配置](docs/zh-CN/configuration.md)、[架构](docs/zh-CN/architecture.md)、[网页地图](docs/zh-CN/web-map.md)、[服务器模组](docs/zh-CN/mod.md)、[遥测与 HTTP API](docs/zh-CN/telemetry.md)、[更新](docs/zh-CN/migration.md)。
 
 默认数据目录是 `~/Library/Application Support/tMapOnline`，其中保存地图缓存、玩家历史、导入的地图和 Boss 进度。可以通过服务器 YAML 中的 `storage.data_dir` 修改目录。
 

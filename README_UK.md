@@ -11,6 +11,8 @@
 
 ## що є на мапі
 
+![мапа tMapOnline](docs/images/world-map-overview.png)
+
 - спільне дослідження світу та маршрути гравців за період із конфігурації сервера;
 - гравці, голови NPC і босів, пілони, монети, точка появи, позначки смерті та Map Ping;
 - зміни блоків у реальному часі й плавне затемнення недосліджених місць з урахуванням освітлення;
@@ -69,7 +71,7 @@ TML_ROOT="/path/to/tModLoader" python3 tools/build-mod.py
 
 ## налаштування та дані
 
-приклад конфігурації є у [config.example.yaml](config.example.yaml). Технічна документація наразі лише російською: [налаштування сервера](docs/configuration.md), [архітектура](docs/architecture.md), [вебмапа](docs/web-map.md), [серверний мод](docs/mod.md), [телеметрія та HTTP API](docs/telemetry.md), [оновлення](docs/migration.md).
+приклад конфігурації є у [config.example.yaml](config.example.yaml). Детальна технічна документація: [налаштування сервера](docs/uk/configuration.md), [архітектура](docs/uk/architecture.md), [вебмапа](docs/uk/web-map.md), [серверний мод](docs/uk/mod.md), [телеметрія та HTTP API](docs/uk/telemetry.md), [оновлення](docs/uk/migration.md).
 
 за замовчуванням дані зберігаються в `~/Library/Application Support/tMapOnline`: там є кеш мапи, історія гравців, імпортовані мапи та прогрес босів. Шлях можна змінити через `storage.data_dir` у конфігурації сервера.
 

@@ -11,6 +11,8 @@
 
 ## マップに表示されるもの
 
+![tMapOnline のワールドマップ](docs/images/world-map-overview.png)
+
 - サーバー設定で指定した期間の、チーム共通の探索状況とプレイヤーの移動ルート
 - プレイヤー、NPCとボスの頭部、ピラー、コイン、スポーン地点、死亡地点、Map Ping
 - タイルのリアルタイム更新と、光の影響を受ける滑らかな未探索エリアの暗転
@@ -69,7 +71,7 @@ TML_ROOT="/path/to/tModLoader" python3 tools/build-mod.py
 
 ## 設定とデータ
 
-設定例は[config.example.yaml](config.example.yaml)にあります。詳しい技術ドキュメントは現在ロシア語です：[サーバー設定](docs/configuration.md)、[アーキテクチャ](docs/architecture.md)、[Webマップ](docs/web-map.md)、[サーバーモッド](docs/mod.md)、[テレメトリとHTTP API](docs/telemetry.md)、[更新方法](docs/migration.md)。
+設定例は[config.example.yaml](config.example.yaml)にあります。詳しい技術ドキュメントは日本語で読めます：[サーバー設定](docs/ja/configuration.md)、[アーキテクチャ](docs/ja/architecture.md)、[Webマップ](docs/ja/web-map.md)、[サーバーモッド](docs/ja/mod.md)、[テレメトリとHTTP API](docs/ja/telemetry.md)、[更新方法](docs/ja/migration.md)。
 
 デフォルトでは`~/Library/Application Support/tMapOnline`にデータを保存します。マップキャッシュ、プレイヤー履歴、インポートしたマップ、ボスの進行状況が含まれます。保存先はサーバーYAMLの`storage.data_dir`で変更できます。
 

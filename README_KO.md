@@ -11,6 +11,8 @@
 
 ## 지도에서 볼 수 있는 것
 
+![tMapOnline 월드 지도](docs/images/world-map-overview.png)
+
 - 서버 설정 기간에 따른 팀 공통 탐험 진행 상황과 플레이어 이동 경로;
 - 플레이어, NPC 및 보스 머리, 수정 기둥, 동전, 스폰 지점, 사망 표시, Map Ping;
 - 실시간 타일 변경과 조명에 따라 부드럽게 어두워지는 미탐험 영역;
@@ -69,7 +71,7 @@ TML_ROOT="/path/to/tModLoader" python3 tools/build-mod.py
 
 ## 설정과 데이터
 
-예제 서버 설정은 [config.example.yaml](config.example.yaml)에 있습니다. 자세한 기술 문서는 현재 러시아어로만 제공됩니다: [서버 설정](docs/configuration.md), [구조](docs/architecture.md), [웹 지도](docs/web-map.md), [서버 모드](docs/mod.md), [텔레메트리 및 HTTP API](docs/telemetry.md), [업데이트](docs/migration.md).
+예제 서버 설정은 [config.example.yaml](config.example.yaml)에 있습니다. 자세한 기술 문서는 한국어로 제공됩니다: [서버 설정](docs/ko/configuration.md), [구조](docs/ko/architecture.md), [웹 지도](docs/ko/web-map.md), [서버 모드](docs/ko/mod.md), [텔레메트리 및 HTTP API](docs/ko/telemetry.md), [업데이트](docs/ko/migration.md).
 
 기본적으로 데이터는 `~/Library/Application Support/tMapOnline`에 저장됩니다. 여기에는 지도 캐시, 플레이어 기록, 가져온 지도와 보스 진행 상황이 들어 있습니다. 서버 YAML의 `storage.data_dir`로 경로를 바꿀 수 있습니다.
 

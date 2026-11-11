@@ -11,6 +11,8 @@ it began as a simple server status page – how long the server had been running
 
 ## what's on the map
 
+![tMapOnline world map](docs/images/world-map-overview.png)
+
 - shared world exploration and player routes for the period set in the server config;
 - players, NPC and boss heads, pylons, coins, spawn point, death markers, and Map Ping;
 - live tile changes and unexplored areas shaded with soft edges and lighting;
@@ -80,7 +82,7 @@ available checks: `npm run typecheck`, `npm run check:python`, `npm run check:we
 
 ## config and data
 
-the example server config is in [config.example.yaml](config.example.yaml). the detailed config reference and other technical docs are currently in Russian: [server settings](docs/configuration.md), [architecture](docs/architecture.md), [web map](docs/web-map.md), [server mod](docs/mod.md), [telemetry and HTTP API](docs/telemetry.md), and [updating](docs/migration.md).
+the example server config is in [config.example.yaml](config.example.yaml). detailed technical docs are available in English: [server settings](docs/en/configuration.md), [architecture](docs/en/architecture.md), [web map](docs/en/web-map.md), [server mod](docs/en/mod.md), [telemetry and HTTP API](docs/en/telemetry.md), and [updating](docs/en/migration.md).
 
 by default, tMapOnline stores data in `~/Library/Application Support/tMapOnline`. this folder contains map cache, player history, imported maps, and boss progress. you can change the path with `storage.data_dir` in the server YAML config.
 

@@ -11,6 +11,8 @@ au début, c’était une simple page d’état du serveur : depuis combien de t
 
 ## ce qu’on voit sur la carte
 
+![carte tMapOnline](docs/images/world-map-overview.png)
+
 - l’exploration commune du monde et les itinéraires des joueurs sur la période définie dans la configuration du serveur ;
 - les joueurs, les têtes des PNJ et des boss, les pylônes, les pièces, le point d’apparition, les morts et Map Ping ;
 - les changements de blocs en direct et un assombrissement doux des zones inexplorées, influencé par la lumière ;
@@ -69,7 +71,7 @@ le script crée `dist/tMapOnline.tmod`, sans remplacer le mod d’un serveur en 
 
 ## configuration et données
 
-la configuration d’exemple se trouve dans [config.example.yaml](config.example.yaml). La documentation technique détaillée est pour l’instant en russe : [configuration du serveur](docs/configuration.md), [architecture](docs/architecture.md), [carte web](docs/web-map.md), [mod serveur](docs/mod.md), [télémétrie et API HTTP](docs/telemetry.md), [mise à jour](docs/migration.md).
+la configuration d’exemple se trouve dans [config.example.yaml](config.example.yaml). La documentation technique détaillée est disponible en français : [configuration du serveur](docs/fr/configuration.md), [architecture](docs/fr/architecture.md), [carte web](docs/fr/web-map.md), [mod serveur](docs/fr/mod.md), [télémétrie et API HTTP](docs/fr/telemetry.md), [mise à jour](docs/fr/migration.md).
 
 par défaut, les données sont stockées dans `~/Library/Application Support/tMapOnline` : cache de la carte, historique des joueurs, cartes importées et progression des boss. Modifie `storage.data_dir` dans la configuration serveur pour changer le dossier.
 
