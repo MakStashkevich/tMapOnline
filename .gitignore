@@ -8,6 +8,7 @@ config.local.yaml
 dist/
 build/
 node_modules/
+/tmaponline/web/assets/
 *.egg-info/
 **/bin/
 **/obj/
