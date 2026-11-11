@@ -1,22 +1,21 @@
-# Terraria sprite renderer
+# подготовка игровых спрайтов
 
-tMapOnline renders player portraits, NPC/boss heads, and map item icons in a
-pure-Python package. It reads the same local Terraria `.xnb` and mod-exported
-PNG textures as before, then writes cached PNGs under the tMapOnline data folder.
-The tModLoader mod remains C#; this package only replaces the separate Java
-image helper.
+эта часть tMapOnline превращает игровые текстуры в маленькие PNG-изображения для веб-карты. она подготавливает аватары игроков, головы NPC и боссов, а также значки предметов на карте. готовые картинки сохраняются в кэше данных tMapOnline, чтобы не обрабатывать исходные текстуры при каждом запросе.
 
-`XnbTextureReader` validates the XNB header, asset reader table, dimensions,
-pixel format, and byte count before returning RGBA pixels. For compressed XNB
-assets it strips the 32 KiB frame headers and decodes the LZX stream in
-Python. Player layers are composited in their existing order, NPC textures are
-cropped to a head portrait and receive the pixel outline, and map item textures
-are trimmed to visible pixels.
+для простого сравнения: XNB – это контейнер, в котором Terraria хранит игровые ресурсы. его нельзя напрямую показать как PNG. рендерер читает контейнер, достаёт пиксели, собирает слои персонажа и записывает результат в браузерный формат.
 
-Pillow is the only added runtime dependency. It reads mod-exported PNGs and
-writes the cached output; LZX decoding and the source-over pixel compositor
-are Python code. Java and `javac` are no longer needed to start tMapOnline or
-generate these sprites.
+## как получается картинка
 
-The LZX decoder is distributed under the MIT license. Its required license
-notice is included as `LICENSE-lzx.txt`.
+1. `XnbTextureReader` открывает файл `.xnb` и проверяет, что файл целый: смотрит заголовок, список типов данных, размеры изображения, формат пикселя и число пикселей.
+2. если текстура сжата, `lzx.py` распаковывает её. некоторые XNB разбивают сжатые данные на кадры размером 32 КиБ; reader сначала отделяет эти заголовки, а затем читает содержимое.
+3. `PlayerSpriteRenderer` накладывает части одежды и внешнего вида игрока в правильном порядке. `NpcSpriteRenderer` вырезает портрет из текстуры NPC и добавляет пиксельную обводку. `MapItemSpriteRenderer` убирает прозрачные края вокруг значка предмета.
+4. Pillow читает или записывает PNG. это небольшая внешняя библиотека для работы с изображениями; она не отвечает за правила сборки игрового спрайта.
+5. `StatusStore` хранит готовый файл и выдаёт его через HTTP API, когда браузеру нужна картинка.
+
+RGBA – формат пикселя из четырёх чисел: красный, зелёный, синий и прозрачность. прозрачность позволяет сохранить форму спрайта без прямоугольного фона. «Композиция» означает, что несколько таких изображений накладываются друг на друга, например броня поверх тела персонажа.
+
+## необходимые программы и лицензия
+
+Pillow – единственная дополнительная runtime-зависимость этого модуля. LZX-декодер и код наложения RGBA-слоёв входят в исходники tMapOnline. поэтому для обработки спрайтов не нужно отдельно устанавливать Java или `javac`.
+
+LZX-декодер распространяется по лицензии MIT. условия и обязательное уведомление находятся в [LICENSE-lzx.txt](LICENSE-lzx.txt). лицензии игровых ресурсов и сторонних модов проверяются отдельно: наличие технической возможности прочитать текстуру само по себе не означает, что её можно свободно распространять.
